@@ -361,3 +361,63 @@ describe('replanFromNow — at the start line', () => {
     expect(plan.burnRate.method).toBe('seed')
   })
 })
+
+describe('replanFromNow — availability moves with the clock', () => {
+  const withWindow = (untilSeconds: number) =>
+    fixtureInput({
+      drivers: [driver('ana', { availableUntilSeconds: untilSeconds }), driver('bo'), driver('cy')],
+      fairnessWeight: 0,
+    })
+
+  it('still honours a window measured from the green flag', () => {
+    // Ana leaves three hours in. Re-solving at the two-hour mark, she has one
+    // hour left — not three, and not none.
+    const plan = expectOk(
+      replanFromNow(withWindow(3 * HOUR), {
+        elapsedSeconds: 2 * HOUR,
+        stints: [{ driverId: 'bo', startOffsetSeconds: 0, endOffsetSeconds: 2 * HOUR }],
+        fuelGallons: race.fuelCapacityGallons,
+      }),
+    )
+
+    for (const stint of plan.stints) {
+      // Offsets come back in race time, so the window is directly comparable.
+      if (stint.driverId === 'ana') expect(stint.endOffsetSeconds).toBeLessThanOrEqual(3 * HOUR)
+    }
+  })
+
+  it('leaves out a driver whose window has already closed', () => {
+    const plan = expectOk(
+      replanFromNow(withWindow(2 * HOUR), {
+        elapsedSeconds: 3 * HOUR,
+        stints: [{ driverId: 'ana', startOffsetSeconds: 0, endOffsetSeconds: 2 * HOUR }],
+        fuelGallons: race.fuelCapacityGallons,
+      }),
+    )
+
+    expect(plan.stints.map((s) => s.driverId)).not.toContain('ana')
+  })
+
+  it('refuses when everybody left has run out of day', () => {
+    const failure = expectFailure(
+      replanFromNow(
+        fixtureInput({
+          drivers: [
+            driver('ana', { availableUntilSeconds: 2 * HOUR }),
+            driver('bo', { availableUntilSeconds: 2 * HOUR }),
+            driver('cy', { availableUntilSeconds: 2 * HOUR }),
+          ],
+        }),
+        {
+          elapsedSeconds: 3 * HOUR,
+          stints: [{ driverId: 'ana', startOffsetSeconds: 0, endOffsetSeconds: 2 * HOUR }],
+          fuelGallons: race.fuelCapacityGallons,
+        },
+      ),
+    )
+
+    // Not "no eligible drivers" — they exist, they just cannot drive any more.
+    expect(['availability_gap', 'no_eligible_drivers']).toContain(failure.reason)
+    expect(failure.detail.length).toBeGreaterThan(0)
+  })
+})

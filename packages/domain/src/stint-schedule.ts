@@ -7,9 +7,20 @@
  * on their own.
  */
 
+import { isAvailableFor } from './availability.js'
 import type { PlannerDriver, ScheduleContext } from './stint-solver.js'
 
 const HOUR_SECONDS = 3600
+
+/**
+ * How many assignments the search will try before giving up.
+ *
+ * Backtracking over stints is exponential in the worst case, and a pit wall
+ * cannot wait. This is generous for any real entry — a dozen stints over half a
+ * dozen drivers — and the cap failing means "no plan found", which is reported
+ * as a refusal rather than a wrong answer.
+ */
+const MAX_SEARCH_STEPS = 50_000
 
 /**
  * Hand each stint to whoever has driven least so far, roster order breaking
@@ -21,52 +32,93 @@ export function assignDrivers(a: ScheduleContext, nominal: number): PlannerDrive
   // stints. It binds hardest on a small roster: two drivers on short stints
   // cannot legally alternate, however fair the split looks.
   const restSeconds = a.rules?.driver.min_rest_seconds ?? 0
-  // Seat time starts from what has already been driven, not from zero: that is
-  // what makes replanning fair across the whole race rather than the remainder.
+  const cap = a.rules?.driver.max_consecutive_stint_seconds ?? Number.POSITIVE_INFINITY
   const seat = new Map<string, number>(
     a.eligible.map((d) => [d.id, a.fromNow?.priorSeatTimeSeconds[d.id] ?? 0]),
   )
-  const assigned: PlannerDriver[] = []
-  const cap = a.rules?.driver.max_consecutive_stint_seconds ?? Number.POSITIVE_INFINITY
 
-  for (let index = 0; index < a.stintCount; index++) {
-    // The driver on track cannot be swapped out by re-solving; the first
-    // remaining stint is the rest of the one they are already driving.
-    if (index === 0 && a.fromNow?.lockedFirstDriverId) {
-      const locked = a.eligible.find((d) => d.id === a.fromNow?.lockedFirstDriverId)
-      if (!locked) return null
-      assigned.push(locked)
-      seat.set(locked.id, (seat.get(locked.id) ?? 0) + nominal)
-      continue
+  const assigned: PlannerDriver[] = []
+  let steps = 0
+
+  /**
+   * Depth-first over stints, trying drivers in preference order.
+   *
+   * Without windows this explores exactly the path the old greedy loop took,
+   * so the answer is unchanged and objective terms 3 and 5 still decide it: the
+   * first complete assignment found is the preferred one. Backtracking only
+   * does work when a constraint would otherwise strand a later stint — which
+   * greedy could not see coming, because it committed before it knew.
+   */
+  const place = (index: number): boolean => {
+    if (index === a.stintCount) return true
+    if (++steps > MAX_SEARCH_STEPS) return false
+
+    for (const driver of candidatesFor(a, assigned, index, nominal, restSeconds, cap, seat)) {
+      assigned.push(driver)
+      seat.set(driver.id, (seat.get(driver.id) ?? 0) + nominal)
+
+      if (place(index + 1)) return true
+
+      assigned.pop()
+      seat.set(driver.id, (seat.get(driver.id) ?? 0) - nominal)
     }
 
-    const previous = assigned.at(-1)
-    const candidates = a.eligible.filter((driver) => {
+    return false
+  }
+
+  return place(0) ? assigned : null
+}
+
+/** Drivers who could legally take this stint, best first. */
+function candidatesFor(
+  a: ScheduleContext,
+  assigned: readonly PlannerDriver[],
+  index: number,
+  nominal: number,
+  restSeconds: number,
+  cap: number,
+  seat: ReadonlyMap<string, number>,
+): PlannerDriver[] {
+  // The driver already on track cannot be swapped out by re-solving; the first
+  // remaining stint is the rest of the one they are already driving.
+  if (index === 0 && a.fromNow?.lockedFirstDriverId) {
+    const locked = a.eligible.find((d) => d.id === a.fromNow?.lockedFirstDriverId)
+    return locked ? [locked] : []
+  }
+
+  const sequence = index + 1
+  const startSeconds = index * (nominal + a.pitStopSeconds)
+  const endSeconds = startSeconds + nominal
+
+  // A pin is absolute: this stint belongs to that driver and nobody else, and
+  // that driver takes no other stint.
+  const pinned = a.eligible.find((d) => d.pinnedSequence === sequence)
+  const pool = pinned ? [pinned] : a.eligible.filter((d) => !d.pinnedSequence)
+
+  const previous = assigned.at(-1)
+
+  return pool
+    .filter((driver) => {
+      if (!isAvailableFor(driver, startSeconds, endSeconds)) return false
+
       if (
         restSeconds > 0 &&
         !hasRested(assigned, driver, index, nominal, a.pitStopSeconds, restSeconds)
       ) {
         return false
       }
+
       if (driver.id !== previous?.id) return nominal <= cap
       // Consecutive stints accumulate: a pit stop is not a rest if the driver
       // never got out. This reading of an UNVERIFIED field is the conservative
       // one; see `series-rules`.
       return consecutiveRun(assigned, nominal) + nominal <= cap
     })
-    if (candidates.length === 0) return null
-
-    let best = candidates[0]
-    if (!best) return null
-    for (const candidate of candidates) {
-      if ((seat.get(candidate.id) ?? 0) < (seat.get(best.id) ?? 0)) best = candidate
-    }
-
-    assigned.push(best)
-    seat.set(best.id, (seat.get(best.id) ?? 0) + nominal)
-  }
-
-  return assigned
+    .sort(
+      (x, y) =>
+        (seat.get(x.id) ?? 0) - (seat.get(y.id) ?? 0) ||
+        a.eligible.indexOf(x) - a.eligible.indexOf(y),
+    )
 }
 
 /**
@@ -128,6 +180,27 @@ export function withinRestRequirement(
     clock += length + a.pitStopSeconds
   }
 
+  return true
+}
+
+/**
+ * Re-check availability against real lengths.
+ *
+ * Assignment reasons about nominal equal stints; water-filling can push a
+ * boundary past somebody's window. Cheaper to re-check than to solve lengths
+ * and assignment together.
+ */
+export function withinAvailability(
+  a: ScheduleContext,
+  assigned: readonly PlannerDriver[],
+  lengths: readonly number[],
+): boolean {
+  let clock = 0
+  for (const [index, driver] of assigned.entries()) {
+    const length = lengths[index] ?? 0
+    if (!isAvailableFor(driver, clock, clock + length)) return false
+    clock += length + a.pitStopSeconds
+  }
   return true
 }
 

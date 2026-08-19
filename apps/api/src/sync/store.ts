@@ -24,6 +24,7 @@ const TABLES = {
   drivers: s.drivers,
   stints: s.stints,
   fuel_fills: s.fuel_fills,
+  driver_availability: s.driver_availability,
   consumable_sets: s.consumable_sets,
   consumable_events: s.consumable_events,
   expenses: s.expenses,

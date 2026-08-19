@@ -1,3 +1,4 @@
+export * from './availability.js'
 export * from './burn-rate.js'
 export * from './consumables.js'
 export * from './driver-burn-rate.js'

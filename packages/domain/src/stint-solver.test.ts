@@ -665,3 +665,156 @@ describe('solveStintPlan — driver counts are a function of race length', () =>
     expect(failure.detail).toMatch(/3 drivers/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// #57 — when a driver can actually be in the car
+// ---------------------------------------------------------------------------
+
+describe('solveStintPlan — availability windows', () => {
+  it('never plans a driver past the time they have to leave', () => {
+    // "I need to be done for the day by 1pm", three hours into an eight-hour
+    // race.
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 8 * HOUR,
+          fairnessWeight: 0,
+          drivers: [driver('dan', { availableUntilSeconds: 3 * HOUR }), driver('bo'), driver('cy')],
+        }),
+      ),
+    )
+
+    for (const stint of plan.stints) {
+      if (stint.driverId === 'dan') expect(stint.endOffsetSeconds).toBeLessThanOrEqual(3 * HOUR)
+    }
+    expect(plan.stints.some((s) => s.driverId === 'dan')).toBe(true)
+  })
+
+  it('refuses when nobody can cover part of the race, and says which part', () => {
+    // A refusal the crew cannot act on is barely better than a wrong plan.
+    const failure = expectFailure(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 8 * HOUR,
+          drivers: [
+            driver('dan', { availableUntilSeconds: 3 * HOUR }),
+            driver('bo', { availableUntilSeconds: 3 * HOUR }),
+          ],
+        }),
+      ),
+    )
+
+    expect(failure.reason).toBe('availability_gap')
+    expect(failure.detail).toMatch(/3h 00m/)
+    expect(failure.detail).toMatch(/8h 00m/)
+  })
+
+  it('is happy with a clean hand-over and no overlap', () => {
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 8 * HOUR,
+          fairnessWeight: 0,
+          drivers: [
+            driver('morning', { availableUntilSeconds: 4 * HOUR }),
+            driver('afternoon', { availableFromSeconds: 4 * HOUR }),
+          ],
+        }),
+      ),
+    )
+
+    for (const stint of plan.stints) {
+      if (stint.driverId === 'morning') expect(stint.endOffsetSeconds).toBeLessThanOrEqual(4 * HOUR)
+      if (stint.driverId === 'afternoon') {
+        expect(stint.startOffsetSeconds).toBeGreaterThanOrEqual(4 * HOUR)
+      }
+    }
+  })
+
+  it('backtracks where a greedy pass would strand a later stint', () => {
+    // Greedy hands stint 1 to whoever has driven least, which early on is
+    // everyone. Give it the driver who is about to leave and the last stint has
+    // nobody legal — even though a legal whole-plan assignment exists. This is
+    // the case the old assignment could not solve.
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 4 * HOUR,
+          fairnessWeight: 0,
+          drivers: [driver('leaves-early', { availableUntilSeconds: 2 * HOUR }), driver('all-day')],
+        }),
+      ),
+    )
+
+    const last = plan.stints.at(-1)
+    expect(last?.driverId).toBe('all-day')
+    expect(plan.stints.at(-1)?.endOffsetSeconds).toBe(4 * HOUR)
+  })
+
+  it('does not report a short window as unfairness', () => {
+    // Fairness has to stop fighting a constraint it cannot change. At full
+    // fairness weight, a plan must still exist when somebody can only do part
+    // of the day.
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 8 * HOUR,
+          fairnessWeight: 1,
+          drivers: [
+            driver('half-day', { availableUntilSeconds: 4 * HOUR }),
+            driver('bo'),
+            driver('cy'),
+          ],
+        }),
+      ),
+    )
+
+    const halfDay = plan.seatTimeSecondsByDriver['half-day'] ?? 0
+    const bo = plan.seatTimeSecondsByDriver.bo ?? 0
+    // They take less, and that is correct rather than unfair.
+    expect(halfDay).toBeLessThan(bo)
+  })
+})
+
+describe('solveStintPlan — pinned stints', () => {
+  it('gives a pinned driver the stint they claimed', () => {
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 6 * HOUR,
+          fairnessWeight: 0,
+          drivers: [driver('a'), driver('b'), driver('starter', { pinnedSequence: 1 })],
+        }),
+      ),
+    )
+
+    expect(plan.stints[0]?.driverId).toBe('starter')
+  })
+
+  it('does not give a pinned driver any other stint', () => {
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 6 * HOUR,
+          fairnessWeight: 0,
+          drivers: [driver('a'), driver('b'), driver('starter', { pinnedSequence: 1 })],
+        }),
+      ),
+    )
+
+    expect(plan.stints.filter((s) => s.driverId === 'starter')).toHaveLength(1)
+  })
+
+  it('refuses when two drivers claim the same stint', () => {
+    const failure = expectFailure(
+      solveStintPlan(
+        baseInput({
+          drivers: [driver('a', { pinnedSequence: 1 }), driver('b', { pinnedSequence: 1 })],
+        }),
+      ),
+    )
+
+    expect(failure.reason).toBe('conflicting_pins')
+    expect(failure.detail).toMatch(/stint 1/)
+  })
+})

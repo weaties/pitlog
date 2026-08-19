@@ -17,7 +17,7 @@
  * stop would be handed a different schedule every time for no reason.
  */
 
-import type { StintPlanInput, StintPlanResult } from './stint-solver.js'
+import type { PlannerDriver, StintPlanInput, StintPlanResult } from './stint-solver.js'
 import { solveStintPlan } from './stint-solver.js'
 
 export interface ActualStint {
@@ -64,6 +64,10 @@ export function replanFromNow(input: StintPlanInput, progress: RaceProgress): St
   const result = solveStintPlan({
     ...input,
     raceSeconds: remainingSeconds,
+    // Windows are wall-clock, and a replan's zero is now. Shifting them is
+    // what makes "I have to leave by one" keep meaning that at half past
+    // twelve — the point at which the constraint actually earns its keep.
+    drivers: input.drivers.map((driver) => clipToNow(driver, progress.elapsedSeconds)),
     startFuelGallons: progress.fuelGallons,
     fromNow: {
       priorSeatTimeSeconds,
@@ -88,6 +92,31 @@ export function replanFromNow(input: StintPlanInput, progress: RaceProgress): St
       })),
     },
   }
+}
+
+/**
+ * Move a driver's availability into the replan's frame.
+ *
+ * A driver whose window has already closed is marked unable to drive rather
+ * than given an empty one: "nobody is available from 5h to 8h" is a better
+ * refusal than a search that quietly finds no candidates.
+ */
+function clipToNow(driver: PlannerDriver, elapsedSeconds: number): PlannerDriver {
+  const until = driver.availableUntilSeconds
+  if (until !== null && until !== undefined && until <= elapsedSeconds) {
+    return { ...driver, canDrive: false }
+  }
+
+  // Spread-then-overwrite only where there is something to shift, so an absent
+  // window stays absent rather than becoming an explicit undefined.
+  const shifted: PlannerDriver = { ...driver }
+  if (typeof driver.availableFromSeconds === 'number') {
+    shifted.availableFromSeconds = Math.max(0, driver.availableFromSeconds - elapsedSeconds)
+  }
+  if (typeof until === 'number') {
+    shifted.availableUntilSeconds = until - elapsedSeconds
+  }
+  return shifted
 }
 
 /**

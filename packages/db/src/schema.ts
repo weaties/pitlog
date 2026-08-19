@@ -454,6 +454,42 @@ export const laps = pgTable(
   ],
 )
 
+/**
+ * When a driver can be in the car, for one session — SPEC §5.1, #57.
+ *
+ * Per session rather than per driver, because availability is a fact about a
+ * weekend, not about a person: somebody who has to leave at one on Saturday is
+ * there all day on Sunday.
+ *
+ * `pinned_sequence` is the blunter instrument beside it. A window says "I have
+ * to leave by one"; a pin says "I am taking the start". Both are honoured and
+ * they can contradict each other, in which case the planner refuses rather than
+ * quietly picking one.
+ */
+export const driver_availability = pgTable(
+  'driver_availability',
+  {
+    id: uuid('id').primaryKey(),
+    team_id: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    session_id: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    driver_id: uuid('driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    /** Null means "from the green flag". */
+    available_from_at: timestamp('available_from_at', { withTimezone: true }),
+    /** Null means "to the chequered flag". */
+    available_until_at: timestamp('available_until_at', { withTimezone: true }),
+    /** 1-based stint number this driver must take, if any. */
+    pinned_sequence: integer('pinned_sequence'),
+    ...syncColumns,
+  },
+  (t) => [uniqueIndex('driver_availability_session_driver_uq').on(t.session_id, t.driver_id)],
+)
+
 // ---------------------------------------------------------------------------
 // Consumables
 // ---------------------------------------------------------------------------

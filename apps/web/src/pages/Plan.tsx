@@ -15,13 +15,14 @@ import type { PitNowComparison, StintPlan } from '@pitlog/domain'
 import { unverifiedFields } from '@pitlog/domain'
 import { useCurrentTeam } from '../lib/team.js'
 import { useSync } from '../offline/useSync.js'
+import { Availability } from '../planner/Availability.js'
 import type { PlanView } from '../planner/usePlan.js'
 import { usePlan } from '../planner/usePlan.js'
 import { Card, Empty } from '../ui/controls.js'
 import { Shell } from '../ui/Shell.js'
 
 export function PlanPage() {
-  const { teamId, loading } = useCurrentTeam()
+  const { teamId, userId, canWrite, loading } = useCurrentTeam()
   const sync = useSync(teamId)
   const plan = usePlan(teamId)
 
@@ -41,6 +42,17 @@ export function PlanPage() {
             looks like an answer is worse than none.
           </p>
         </Card>
+      )}
+
+      {plan.session && teamId && (
+        <Availability
+          teamId={teamId}
+          userId={userId}
+          sessionId={plan.session.id}
+          sessionStart={plan.session.starts_at ? new Date(plan.session.starts_at) : null}
+          drivers={plan.drivers.map((d) => ({ id: d.id, firstName: d.first_name }))}
+          canWrite={canWrite}
+        />
       )}
 
       {plan.result?.ok && (
@@ -246,6 +258,13 @@ function Assumptions({ plan, view }: { plan: StintPlan; view: PlanView }) {
           </li>
         ))}
       </ul>
+
+      {view.constrained.length > 0 && (
+        <p className="text-pit-muted text-xs" data-testid="shaped-by-availability">
+          This plan is shaped by who was available:{' '}
+          {view.constrained.map((c) => view.driverName(c.driverId)).join(', ')}.
+        </p>
+      )}
 
       <p className="text-pit-muted text-xs">
         Fuel state on a live replan assumes the tank was brimmed at the last stop.
