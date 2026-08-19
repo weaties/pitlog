@@ -17,11 +17,25 @@ const HOUR_SECONDS = 3600
  * round robin, which is what a crew would write on the whiteboard.
  */
 export function assignDrivers(a: ScheduleContext, nominal: number): PlannerDriver[] | null {
-  const seat = new Map<string, number>(a.eligible.map((d) => [d.id, 0]))
+  // Seat time starts from what has already been driven, not from zero: that is
+  // what makes replanning fair across the whole race rather than the remainder.
+  const seat = new Map<string, number>(
+    a.eligible.map((d) => [d.id, a.fromNow?.priorSeatTimeSeconds[d.id] ?? 0]),
+  )
   const assigned: PlannerDriver[] = []
   const cap = a.rules?.driver.max_consecutive_stint_seconds ?? Number.POSITIVE_INFINITY
 
   for (let index = 0; index < a.stintCount; index++) {
+    // The driver on track cannot be swapped out by re-solving; the first
+    // remaining stint is the rest of the one they are already driving.
+    if (index === 0 && a.fromNow?.lockedFirstDriverId) {
+      const locked = a.eligible.find((d) => d.id === a.fromNow?.lockedFirstDriverId)
+      if (!locked) return null
+      assigned.push(locked)
+      seat.set(locked.id, (seat.get(locked.id) ?? 0) + nominal)
+      continue
+    }
+
     const previous = assigned.at(-1)
     const candidates = a.eligible.filter((driver) => {
       if (driver.id !== previous?.id) return nominal <= cap
@@ -86,18 +100,26 @@ export interface Bounds {
  * land a second past a real limit.
  */
 export function stintBounds(a: ScheduleContext, driver: PlannerDriver, isFirst: boolean): Bounds {
+  // Time already spent in the car this stint counts against the driver's
+  // maximum: someone an hour into a ninety-minute cap has thirty minutes left,
+  // not ninety.
+  const alreadyDriven =
+    isFirst && a.fromNow?.lockedFirstDriverId === driver.id ? a.fromNow.firstStintElapsedSeconds : 0
   const fuelAtStart = isFirst ? a.startFuelGallons : a.fuelCapacityGallons
   const burnGph = a.burnRateGph * driver.burnRateFactor
   const fuelWindow = ((fuelAtStart - a.reserveGallons) / burnGph) * HOUR_SECONDS
 
   const min = Math.ceil(
-    Math.max(driver.minStintSeconds ?? 0, a.rules?.driver.min_stint_seconds ?? 0),
+    Math.max(
+      0,
+      Math.max(driver.minStintSeconds ?? 0, a.rules?.driver.min_stint_seconds ?? 0) - alreadyDriven,
+    ),
   )
   const max = Math.floor(
     Math.min(
-      driver.maxStintSeconds ?? Number.POSITIVE_INFINITY,
-      a.rules?.driver.max_stint_seconds ?? Number.POSITIVE_INFINITY,
-      a.rules?.driver.max_consecutive_stint_seconds ?? Number.POSITIVE_INFINITY,
+      (driver.maxStintSeconds ?? Number.POSITIVE_INFINITY) - alreadyDriven,
+      (a.rules?.driver.max_stint_seconds ?? Number.POSITIVE_INFINITY) - alreadyDriven,
+      (a.rules?.driver.max_consecutive_stint_seconds ?? Number.POSITIVE_INFINITY) - alreadyDriven,
       fuelWindow,
     ),
   )
