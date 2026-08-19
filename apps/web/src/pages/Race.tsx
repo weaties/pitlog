@@ -15,6 +15,7 @@ import { useCurrentTeam } from '../lib/team.js'
 import { useLocalTable, useRefreshLocal } from '../offline/useLocalTable.js'
 import { useSync } from '../offline/useSync.js'
 import { newId, saveRow } from '../offline/write.js'
+import { useRules } from '../planner/usePlan.js'
 import { Button, Card, Empty, Field, Input, Select } from '../ui/controls.js'
 import { Shell } from '../ui/Shell.js'
 
@@ -45,6 +46,7 @@ export function RacePage() {
   const events = useLocalTable<Event>('events')
   const sessions = useLocalTable<Session>('sessions')
   const refresh = useRefreshLocal()
+  const rules = useRules(teamId)
   const [editing, setEditing] = useState<SyncRow<Event> | 'new' | null>(null)
   const [addingSessionTo, setAddingSessionTo] = useState<string | null>(null)
 
@@ -52,6 +54,8 @@ export function RacePage() {
   if (!teamId) return <Shell title="Race">You are not a member of any team yet.</Shell>
 
   const context = { teamId, userId }
+  const seriesName = (id: string | null) =>
+    (rules.data ?? []).find((r) => r.series_id === id)?.series_name
   const all = [...(events.data ?? [])].sort((a, b) =>
     String(a.starts_at ?? '').localeCompare(String(b.starts_at ?? '')),
   )
@@ -87,6 +91,13 @@ export function RacePage() {
                     <p className="text-pit-muted text-sm tabular-nums">
                       {event.fuel_capacity_gallons ?? '—'} gal tank · {event.burn_rate_gph ?? '—'}{' '}
                       gal/h seed
+                    </p>
+                    {/* Which rulebook binds this race. Absent is worth saying
+                        out loud: the planner will apply no series rules at all. */}
+                    <p className="text-sm" data-testid={`series-${event.id}`}>
+                      {seriesName(event.series_id) ?? (
+                        <span className="text-amber-300">No series rules</span>
+                      )}
                     </p>
                   </div>
                   {canWrite && <Button onClick={() => setEditing(event)}>Edit</Button>}
@@ -134,6 +145,7 @@ export function RacePage() {
 
       {editing && (
         <EventForm
+          teamId={teamId}
           event={editing === 'new' ? null : editing}
           onCancel={() => setEditing(null)}
           onSave={async (row) => {
@@ -148,14 +160,17 @@ export function RacePage() {
 }
 
 function EventForm({
+  teamId,
   event,
   onCancel,
   onSave,
 }: {
+  teamId: string
   event: SyncRow<Event> | null
   onCancel: () => void
   onSave: (row: SyncRow<Event>) => Promise<void>
 }) {
+  const rules = useRules(teamId)
   const [form, setForm] = useState({
     name: event?.name ?? '',
     track_name: event?.track_name ?? '',
@@ -163,6 +178,8 @@ function EventForm({
     fuel_capacity_gallons: event?.fuel_capacity_gallons ?? '',
     burn_rate_gph: event?.burn_rate_gph ?? '',
   })
+  const [chosenSeries, setChosenSeries] = useState<string | null>(null)
+  const seriesId = chosenSeries ?? event?.series_id ?? ''
 
   return (
     <Card className="flex flex-col gap-4" data-testid="event-form">
@@ -184,6 +201,27 @@ function EventForm({
             value={form.track_name}
             onChange={(e) => setForm({ ...form, track_name: e.target.value })}
           />
+        )}
+      </Field>
+
+      <Field
+        label="Series"
+        hint="Decides which rulebook the planner is bound by. The three differ."
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={seriesId}
+            onChange={(e) => setChosenSeries(e.target.value)}
+            data-testid="event-series"
+          >
+            <option value="">No series rules</option>
+            {(rules.data ?? []).map((rule) => (
+              <option key={rule.series_id} value={rule.series_id}>
+                {rule.series_name}
+              </option>
+            ))}
+          </Select>
         )}
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -234,7 +272,7 @@ function EventForm({
               ends_at: event?.ends_at ?? null,
               fuel_capacity_gallons: form.fuel_capacity_gallons || null,
               burn_rate_gph: form.burn_rate_gph || null,
-              series_id: event?.series_id ?? null,
+              series_id: seriesId || null,
               rule_config_id: event?.rule_config_id ?? null,
             } as SyncRow<Event>)
           }

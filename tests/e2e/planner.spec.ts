@@ -81,3 +81,43 @@ test('a visitor can read the plan', async ({ page }) => {
   await openPlan(page, 'visitor@example.com')
   await expect(page.getByTestId('schedule')).toBeVisible()
 })
+
+test('a race with no series gets no series rules, rather than a guessed rulebook', async ({
+  page,
+}) => {
+  // The three shipped series differ in ways that change a schedule, so picking
+  // one for the crew would produce a plan that looks authoritative and is bound
+  // by the wrong rulebook. Saying "none" is the honest answer.
+  await page.goto('/login')
+  await page.getByLabel('Email').fill('admin@example.com')
+  await page.getByRole('button', { name: 'Send sign-in link' }).click()
+  await page.getByTestId('dev-link').click()
+  await expect(page.getByTestId('sync-status')).toBeVisible()
+
+  const name = `Unseriesed ${Date.now()}`
+  await page.getByTestId('add-event').click()
+  await page.getByTestId('event-name').fill(name)
+  await page.getByTestId('event-capacity').fill('20')
+  await page.getByTestId('event-burn-rate').fill('14')
+  await page.getByTestId('save-event').click()
+
+  const card = page.getByTestId('events').getByRole('listitem').filter({ hasText: name })
+  await expect(card).toContainText('No series rules')
+})
+
+test('a race can be bound to a named series', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByLabel('Email').fill('admin@example.com')
+  await page.getByRole('button', { name: 'Send sign-in link' }).click()
+  await page.getByTestId('dev-link').click()
+  await expect(page.getByTestId('sync-status')).toBeVisible()
+
+  const name = `ChampCar round ${Date.now()}`
+  await page.getByTestId('add-event').click()
+  await page.getByTestId('event-name').fill(name)
+  await page.getByTestId('event-series').selectOption({ label: 'ChampCar Endurance Series' })
+  await page.getByTestId('save-event').click()
+
+  const card = page.getByTestId('events').getByRole('listitem').filter({ hasText: name })
+  await expect(card).toContainText('ChampCar Endurance Series')
+})
