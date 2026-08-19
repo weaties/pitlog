@@ -4,6 +4,9 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // One .env at the repo root for the whole monorepo, so the web app and the
+  // API cannot disagree about which API URL is in play.
+  envDir: '../..',
   plugins: [
     react(),
     tailwindcss(),
