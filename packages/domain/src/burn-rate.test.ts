@@ -140,7 +140,16 @@ describe('estimateBurnRate — measurement', () => {
       seedGph: null,
     })
 
-    expect(estimate?.datapoints).toEqual([{ fillId: 'f1', gallons: 14, engineHours: 1, gph: 14 }])
+    expect(estimate?.datapoints).toEqual([
+      {
+        fillId: 'f1',
+        gallons: 14,
+        engineHours: 1,
+        gph: 14,
+        windowStart: T0,
+        windowEnd: at(3600),
+      },
+    ])
   })
 
   it('sorts fills before measuring, so an out-of-order sync cannot corrupt the estimate', () => {

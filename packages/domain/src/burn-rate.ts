@@ -81,8 +81,12 @@ export type BurnRateAssumptionCode =
   | 'rolling_window'
   | 'wide_spread'
 
-export interface BurnRateAssumption {
-  code: BurnRateAssumptionCode
+/**
+ * Generic over the code so the per-driver model can add its own vocabulary
+ * without this module knowing about it, while #7 can still render a mixed list.
+ */
+export interface BurnRateAssumption<Code extends string = BurnRateAssumptionCode> {
+  code: Code
   /** Plain-English statement for the UI. The code is what tests assert on. */
   detail: string
 }
@@ -92,6 +96,11 @@ export interface BurnRateDatapoint {
   gallons: number
   engineHours: number
   gph: number
+  /** The tank was last known full here. */
+  windowStart: Date
+  /** …and full again here. Exposed so a per-driver model can ask who was
+   *  actually driving for this measurement, and so the UI can show it. */
+  windowEnd: Date
 }
 
 export interface BurnRateEstimate {
@@ -123,64 +132,7 @@ export function estimateBurnRate(input: BurnRateInput): BurnRateEstimate | null 
     throw new Error(`seed burn rate must be positive, got ${input.seedGph}`)
   }
 
-  const assumptions: BurnRateAssumption[] = []
-  const running = mergeIntervals(input.stints)
-
-  const brimFills = [...input.fills]
-    .filter((f) => f.filledToFull)
-    .sort((a, b) => a.filledAt.getTime() - b.filledAt.getTime())
-
-  const partialCount = input.fills.length - brimFills.length
-  if (partialCount > 0) {
-    assumptions.push({
-      code: 'ignored_partial_fills',
-      detail: `${partialCount} fill${partialCount === 1 ? ' was' : 's were'} not to the brim and cannot measure consumption.`,
-    })
-  }
-
-  const all: BurnRateDatapoint[] = []
-  let baseline = input.knownFullAt
-  let unmeasurable = 0
-
-  for (const fill of brimFills) {
-    if (baseline === null) {
-      // Nothing to measure against, but the tank is full now, so this fill is
-      // the baseline for the next one.
-      baseline = fill.filledAt
-      assumptions.push({
-        code: 'baseline_from_first_fill',
-        detail:
-          'The starting fuel level was never recorded, so the first fill sets the baseline and is not itself a datapoint.',
-      })
-      continue
-    }
-
-    const engineHours = runningHoursBetween(running, baseline, fill.filledAt)
-    baseline = fill.filledAt
-
-    // A zero-volume brim fill means the tank was already full: it moves the
-    // baseline and carries no information. Same for a fill after no running
-    // time, which is also the divide-by-zero guard.
-    if (!(fill.gallons > 0)) continue
-    if (engineHours <= 0) {
-      unmeasurable += 1
-      continue
-    }
-
-    all.push({
-      fillId: fill.id,
-      gallons: fill.gallons,
-      engineHours,
-      gph: fill.gallons / engineHours,
-    })
-  }
-
-  if (unmeasurable > 0) {
-    assumptions.push({
-      code: 'excluded_no_engine_time',
-      detail: `${unmeasurable} fill${unmeasurable === 1 ? '' : 's'} followed no running time and could not be measured.`,
-    })
-  }
+  const { datapoints: all, assumptions } = collectBurnRateDatapoints(input)
 
   if (all.length === 0) {
     if (input.seedGph === null) return null
@@ -217,9 +169,7 @@ export function estimateBurnRate(input: BurnRateInput): BurnRateEstimate | null 
   // Pool the window rather than averaging the per-fill rates: a two-hour run
   // is twice the evidence of a one-hour run, and averaging ratios would give
   // them equal weight.
-  const gallons = datapoints.reduce((sum, d) => sum + d.gallons, 0)
-  const hours = datapoints.reduce((sum, d) => sum + d.engineHours, 0)
-  const gph = gallons / hours
+  const gph = pooledGph(datapoints)
 
   const rates = datapoints.map((d) => d.gph)
   const spreadGph = datapoints.length < 2 ? null : Math.max(...rates) - Math.min(...rates)
@@ -251,6 +201,94 @@ export function estimateBurnRate(input: BurnRateInput): BurnRateEstimate | null 
   }
 }
 
+export interface BurnRateDatapointCollection {
+  datapoints: BurnRateDatapoint[]
+  assumptions: BurnRateAssumption[]
+}
+
+/**
+ * Walk the fills and turn each measurable one into a datapoint.
+ *
+ * Extracted so `estimateBurnRate` and the per-driver model share exactly one
+ * definition of "what a measurement window is". They differ in what they do
+ * with the result — the team rate rolls over the recent few, a driver factor
+ * uses every one it can attribute — but not in how a window is found.
+ */
+export function collectBurnRateDatapoints(
+  input: Pick<BurnRateInput, 'fills' | 'stints' | 'knownFullAt'>,
+): BurnRateDatapointCollection {
+  const assumptions: BurnRateAssumption[] = []
+  const running = mergeIntervals(input.stints)
+
+  const brimFills = [...input.fills]
+    .filter((f) => f.filledToFull)
+    .sort((a, b) => a.filledAt.getTime() - b.filledAt.getTime())
+
+  const partialCount = input.fills.length - brimFills.length
+  if (partialCount > 0) {
+    assumptions.push({
+      code: 'ignored_partial_fills',
+      detail: `${partialCount} fill${partialCount === 1 ? ' was' : 's were'} not to the brim and cannot measure consumption.`,
+    })
+  }
+
+  const datapoints: BurnRateDatapoint[] = []
+  let baseline = input.knownFullAt
+  let unmeasurable = 0
+
+  for (const fill of brimFills) {
+    if (baseline === null) {
+      // Nothing to measure against, but the tank is full now, so this fill is
+      // the baseline for the next one.
+      baseline = fill.filledAt
+      assumptions.push({
+        code: 'baseline_from_first_fill',
+        detail:
+          'The starting fuel level was never recorded, so the first fill sets the baseline and is not itself a datapoint.',
+      })
+      continue
+    }
+
+    const windowStart = baseline
+    const engineHours = runningHoursBetween(running, windowStart, fill.filledAt)
+    baseline = fill.filledAt
+
+    // A zero-volume brim fill means the tank was already full: it moves the
+    // baseline and carries no information. Same for a fill after no running
+    // time, which is also the divide-by-zero guard.
+    if (!(fill.gallons > 0)) continue
+    if (engineHours <= 0) {
+      unmeasurable += 1
+      continue
+    }
+
+    datapoints.push({
+      fillId: fill.id,
+      gallons: fill.gallons,
+      engineHours,
+      gph: fill.gallons / engineHours,
+      windowStart,
+      windowEnd: fill.filledAt,
+    })
+  }
+
+  if (unmeasurable > 0) {
+    assumptions.push({
+      code: 'excluded_no_engine_time',
+      detail: `${unmeasurable} fill${unmeasurable === 1 ? '' : 's'} followed no running time and could not be measured.`,
+    })
+  }
+
+  return { datapoints, assumptions }
+}
+
+/** Pooled rate over a set of datapoints: total gallons over total hours. */
+export function pooledGph(datapoints: readonly BurnRateDatapoint[]): number {
+  const gallons = datapoints.reduce((sum, d) => sum + d.gallons, 0)
+  const hours = datapoints.reduce((sum, d) => sum + d.engineHours, 0)
+  return gallons / hours
+}
+
 function baseConfidence(sampleCount: number): BurnRateConfidence {
   if (sampleCount >= 3) return 'high'
   if (sampleCount === 2) return 'medium'
@@ -263,7 +301,7 @@ function downgrade(confidence: BurnRateConfidence): BurnRateConfidence {
   return confidence
 }
 
-interface Interval {
+export interface Interval {
   start: number
   end: number
 }
@@ -275,7 +313,7 @@ interface Interval {
  * differently and both rows survive until someone reconciles them. Summing the
  * rows directly would double-count that time and halve the burn rate.
  */
-function mergeIntervals(stints: readonly BurnRateStint[]): Interval[] {
+export function mergeIntervals(stints: readonly BurnRateStint[]): Interval[] {
   const raw = stints
     .map((s) => ({
       start: s.startedAt.getTime(),
@@ -298,7 +336,7 @@ function mergeIntervals(stints: readonly BurnRateStint[]): Interval[] {
 }
 
 /** Hours the car was running between two instants. */
-function runningHoursBetween(running: readonly Interval[], from: Date, to: Date): number {
+export function runningHoursBetween(running: readonly Interval[], from: Date, to: Date): number {
   const start = from.getTime()
   const end = to.getTime()
   if (end <= start) return 0
