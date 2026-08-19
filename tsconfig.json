@@ -8,6 +8,9 @@
       "path": "./packages/db"
     },
     {
+      "path": "./packages/sync"
+    },
+    {
       "path": "./apps/api"
     },
     {

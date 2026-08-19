@@ -250,6 +250,62 @@ Losing candidates and their dealbreakers:
 Hono over Fastify for the zero-codegen end-to-end types. If that ever bites,
 swapping the HTTP layer is cheap precisely because the domain logic is not in it.
 
+### Stint solver: a lexicographic objective, not a weighted score (M1)
+
+"Reproduce `KNOWN_GOOD_SOLUTION` exactly" is only a meaningful acceptance test
+if the solver's preference order is pinned down, because the fixture race has
+several fair answers. Three drivers over six stints split seat time evenly
+whether the stints are 75 minutes each or alternating 77 and 73, and A-B-C-A-B-C
+is one of several orders that never runs a driver back to back. A weighted sum
+of objectives would land on one of them by accident of the weights.
+
+So the solver ranks candidate plans by comparing, in order, and only moving to
+the next term on an exact tie:
+
+1. **Feasibility.** Every hard constraint holds, or the plan is not a candidate.
+2. **Fewest pit stops.** Every stop is lost track time.
+3. **Smallest seat-time spread** across drivers who can drive — the fairness
+   term SPEC §5.1 names.
+4. **Smallest stint-length variance.** Among equally fair plans, prefer the even
+   one; it is what a human would write on the whiteboard.
+5. **Roster order.** The final tiebreak, so the output is deterministic rather
+   than dependent on object iteration order.
+
+On the fixture race this chain is forced at every step: five stints would be
+91.2 minutes, over both the 90-minute driver maximum and the 77.1-minute fuel
+window ((20 − 2 gal) ÷ 14 gph), so six is the fewest; six over three drivers is
+two each; equal length breaks the fairness tie; roster order breaks the rest.
+The known-good solution is the only plan that survives, which is what makes
+asserting equality rather than tolerance legitimate.
+
+`fairness_weight` from SPEC §5.1 survives as an input, but it tunes *how much
+unevenness is tolerated to save a stop* — it does not turn terms 2 and 3 into
+commensurable numbers.
+
+### One sync endpoint, not per-resource REST (M1)
+
+Every M1 mutation — a fuel fill, a stint boundary, an expense, a roster edit —
+goes through one team-scoped sync endpoint carrying a batch of rows, not
+through a REST route per resource. Per-table Zod schemas parse the batch; the
+tenancy re-check on every row is unchanged, because a sync payload is untrusted
+input like any other.
+
+The reason is that offline-first makes the write path uniform whether the user
+is online or not: the client always writes to IndexedDB and always enqueues,
+and the queue has exactly one drain. Building REST routes first and the sync
+endpoint second would mean writing every logging and expense screen twice, and
+the second version would be the one that had to work at the track.
+
+Reads stay ordinary REST for anything server-computed (the dashboard, the
+visitor view). Reads the pit client needs offline come from IndexedDB, hydrated
+by a pull on the same endpoint.
+
+**Still open, and owned by Phase 2:** the pull cursor. A bare
+`server_updated_at` timestamp drops rows written inside the same millisecond as
+the boundary. Either the cursor is `(server_updated_at, id)` with an overlap
+window, or the schema gains a monotonic sequence column — which is a migration,
+so it is decided before #21 and #23, not during them.
+
 ### Deliberate deviations from HelmLog conventions
 
 - **No mypy-style error baseline.** HelmLog's CI tolerates 110 pre-existing
