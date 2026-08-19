@@ -383,7 +383,7 @@ describe('solveStintPlan — rule configs are data', () => {
   })
 
   it('refuses when a series fuel cap makes the minimum stint unreachable', () => {
-    // 8 gal less a 2 gal reserve is 25 minutes at 14 gal/h — the car cannot
+    // 8 gal less a 2 gal reserve is 26 minutes at 14 gal/h — the car cannot
     // reach the 30-minute minimum stint before it runs dry.
     const failure = expectFailure(
       solveStintPlan(
@@ -393,7 +393,8 @@ describe('solveStintPlan — rule configs are data', () => {
         }),
       ),
     )
-    expect(failure.reason).toBe('stint_bounds_unsatisfiable')
+    expect(failure.reason).toBe('fuel_window_below_minimum_stint')
+    expect(failure.detail).toMatch(/reserve/)
   })
 
   it('refuses when the roster is smaller than the series minimum', () => {

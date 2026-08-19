@@ -81,6 +81,29 @@ export interface StintPlanInput {
   fairnessWeight?: number
   /** Defaults to a full tank. Set by live replanning. */
   startFuelGallons?: number
+  /** Set by live replanning; absent when planning a race from the grid. */
+  fromNow?: PlanFromNow
+}
+
+/**
+ * What the solver needs to know about a race already in progress.
+ *
+ * Held in one object rather than four loose fields so that "this is a replan"
+ * is a single visible fact at the call site, and so a future field cannot be
+ * forgotten at one of them.
+ */
+export interface PlanFromNow {
+  /**
+   * Seat time each driver has already taken. Fairness is measured across the
+   * whole race, so a driver who has done two stints is behind on nothing.
+   */
+  priorSeatTimeSeconds: Readonly<Record<string, number>>
+  /** The whole race, which is what the per-driver share cap is a share of. */
+  fullRaceSeconds: number
+  /** The driver already on track, who cannot be swapped out from the pit wall. */
+  lockedFirstDriverId: string | null
+  /** How long they have already been in the car this stint. */
+  firstStintElapsedSeconds: number
 }
 
 export interface PlannedStint {
@@ -104,7 +127,10 @@ export interface StintPlan {
   stints: PlannedStint[]
   fills: PlannedFill[]
   stopCount: number
+  /** Across the whole race: already taken plus newly planned. */
   seatTimeSecondsByDriver: Record<string, number>
+  /** The part of that already driven. Empty when planning from the grid. */
+  seatTimeTakenSecondsByDriver: Record<string, number>
   seatTimeSpreadSeconds: number
   /** After applying any series minimum. */
   pitStopSeconds: number
@@ -122,6 +148,8 @@ export type StintPlanFailureReason =
   | 'insufficient_drivers_for_rules'
   | 'share_cap_unsatisfiable'
   | 'stint_bounds_unsatisfiable'
+  | 'fuel_window_below_minimum_stint'
+  | 'race_complete'
 
 export type StintPlanResult =
   | { ok: true; plan: StintPlan }
@@ -177,6 +205,36 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
     )
   }
 
+  const probe: ScheduleContext = {
+    stintCount: 1,
+    driveSeconds: input.raceSeconds,
+    eligible,
+    rules,
+    shareCap,
+    fairnessWeight,
+    pitStopSeconds,
+    fuelCapacityGallons,
+    startFuelGallons,
+    raceSeconds: input.raceSeconds,
+    reserveGallons: input.reserveGallons,
+    burnRateGph: input.burnRate.gph,
+    fromNow: input.fromNow ?? null,
+  }
+
+  // A first stint that runs the tank to reserve before reaching the shortest
+  // legal stint length makes every stint count unsatisfiable. Worth its own
+  // reason: the generic "no stint count works" would send a crew looking at the
+  // roster when the answer is in the fuel churn.
+  const openingBounds = eligible.map((driver) => stintBounds(probe, driver, true))
+  if (openingBounds.every((b) => b.min > b.max)) {
+    const bestWindow = Math.max(...openingBounds.map((b) => b.max))
+    const shortest = Math.min(...openingBounds.map((b) => b.min))
+    return fail(
+      'fuel_window_below_minimum_stint',
+      `${startFuelGallons} gal above a ${input.reserveGallons} gal reserve is ${(bestWindow / 60).toFixed(0)} min of running, but the shortest stint allowed is ${(shortest / 60).toFixed(0)} min.`,
+    )
+  }
+
   for (let stintCount = 1; stintCount <= MAX_STINTS; stintCount++) {
     const driveSeconds = input.raceSeconds - pitStopSeconds * (stintCount - 1)
     if (driveSeconds <= 0) break
@@ -194,6 +252,7 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
       raceSeconds: input.raceSeconds,
       reserveGallons: input.reserveGallons,
       burnRateGph: input.burnRate.gph,
+      fromNow: input.fromNow ?? null,
     })
 
     if (attempt) {
@@ -234,11 +293,17 @@ export interface ScheduleContext {
   raceSeconds: number
   reserveGallons: number
   burnRateGph: number
+  fromNow: PlanFromNow | null
 }
 
 type Attempt = Pick<
   StintPlan,
-  'stints' | 'fills' | 'stopCount' | 'seatTimeSecondsByDriver' | 'seatTimeSpreadSeconds'
+  | 'stints'
+  | 'fills'
+  | 'stopCount'
+  | 'seatTimeSecondsByDriver'
+  | 'seatTimeTakenSecondsByDriver'
+  | 'seatTimeSpreadSeconds'
 >
 
 /** Build the best plan for exactly this many stints, or null if there isn't one. */
@@ -253,20 +318,27 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
   const lengths = distributeSeconds(a.driveSeconds, bounds)
   if (!lengths) return null
 
+  const taken = a.fromNow?.priorSeatTimeSeconds ?? {}
   const seatTime: Record<string, number> = {}
+  // Every eligible driver appears, so a driver planned no future stints still
+  // counts toward the spread rather than vanishing from the fairness maths.
+  for (const driver of a.eligible) seatTime[driver.id] = taken[driver.id] ?? 0
   for (const [index, driver] of assigned.entries()) {
     seatTime[driver.id] = (seatTime[driver.id] ?? 0) + (lengths[index] ?? 0)
   }
 
   // The share cap and the fairness tolerance are re-checked against the actual
-  // lengths: assignment only ever saw the nominal equal split.
+  // lengths: assignment only ever saw the nominal equal split. Both are
+  // measured across the whole race — a driver who has already used their share
+  // cannot be given more of it just because this solve started at half time.
+  const fullRaceSeconds = a.fromNow?.fullRaceSeconds ?? a.raceSeconds
   for (const seconds of Object.values(seatTime)) {
-    if (seconds / a.raceSeconds > a.shareCap) return null
+    if (seconds / fullRaceSeconds > a.shareCap) return null
   }
 
   const seatValues = Object.values(seatTime)
   const spread = Math.max(...seatValues) - Math.min(...seatValues)
-  const averageSeat = a.driveSeconds / seatValues.length
+  const averageSeat = seatValues.reduce((sum, v) => sum + v, 0) / seatValues.length
   if (spread > (1 - a.fairnessWeight) * averageSeat) return null
 
   if (!withinConsecutiveCap(a, assigned, lengths)) return null
@@ -309,6 +381,7 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
     fills,
     stopCount: a.stintCount - 1,
     seatTimeSecondsByDriver: seatTime,
+    seatTimeTakenSecondsByDriver: { ...taken },
     seatTimeSpreadSeconds: spread,
   }
 }
