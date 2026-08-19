@@ -89,19 +89,29 @@ export function requireTeamPermission(
     }
 
     // A visitor link is issued for one team and is revocable (SPEC §4).
-    // Checking this before the membership lookup means a shared link cannot
-    // walk sideways into another team the account happens to belong to.
-    if (auth.kind === 'visitor' && auth.visitorTeamId !== teamId) throw notFound()
+    // Checking this first means a shared link cannot walk sideways into another
+    // team the account behind it happens to belong to.
+    if (auth.kind === 'visitor') {
+      if (auth.visitorTeamId !== teamId) throw notFound()
+
+      // The link *is* the grant. A token-scoped visitor has no account and no
+      // membership row — that is the whole reason `visitor_links` exists
+      // rather than a bare `visitor` membership — so requiring one here would
+      // make every shared link 404. Read-only, always, whatever else is true
+      // of whoever opened it.
+      if (!can('visitor', permission)) throw forbidden()
+
+      c.set('auth', auth)
+      await next()
+      return
+    }
 
     const membership = await resolveMembership(auth.userId, teamId)
     if (!membership) throw notFound()
 
-    // A visitor session is read-only whatever the membership row says. The
-    // link, not the account, is what was shared.
-    const effectiveRole: Role = auth.kind === 'visitor' ? 'visitor' : membership.role
-    if (!can(effectiveRole, permission)) throw forbidden()
+    if (!can(membership.role, permission)) throw forbidden()
 
-    c.set('auth', { ...auth, membership: { ...membership, role: effectiveRole } })
+    c.set('auth', { ...auth, membership })
     await next()
   }
 }

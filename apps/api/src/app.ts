@@ -11,6 +11,7 @@ import { authRoutes } from './routes/auth.js'
 import { ruleRoutes } from './routes/rules.js'
 import { syncRoutes } from './routes/sync.js'
 import { teamRoutes } from './routes/teams.js'
+import { inviteRoutes, visitorRoutes } from './routes/visitors.js'
 
 export interface AppOptions {
   db: Db
@@ -40,8 +41,11 @@ export function createApp(options: AppOptions) {
   app.get('/api/health', (c) => c.json({ ok: true }))
 
   app.get('/api/me', requireAuth(), (c) => {
-    const { userId, kind } = c.get('auth')
-    return c.json({ userId, kind })
+    const { userId, kind, visitorTeamId } = c.get('auth')
+    // A visitor has no membership rows, so `/api/teams` is empty for them by
+    // construction. Their team comes from the link they opened, and this is
+    // the only place they can learn it.
+    return c.json({ userId, kind, teamId: visitorTeamId ?? null })
   })
 
   app.route(
@@ -56,6 +60,8 @@ export function createApp(options: AppOptions) {
   app.route('/api/teams', teamRoutes({ db, resolveMembership }))
   app.route('/api/teams', syncRoutes({ db, resolveMembership }))
   app.route('/api/teams', ruleRoutes({ db, resolveMembership }))
+  app.route('/api/teams', visitorRoutes({ db, resolveMembership, appOrigin }))
+  app.route('/api/teams', inviteRoutes({ auth, resolveMembership }))
 
   return app
 }

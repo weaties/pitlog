@@ -6,6 +6,7 @@ import { Login } from './pages/Login.js'
 import { PlanPage } from './pages/Plan.js'
 import { RacePage } from './pages/Race.js'
 import { TeamPage } from './pages/Team.js'
+import { VisitPage } from './pages/Visit.js'
 import { TabBar } from './ui/Shell.js'
 
 interface Me {
@@ -31,6 +32,8 @@ export function App() {
   if (!signedIn) {
     return (
       <Routes>
+        {/* A visitor has no account, so this route cannot sit behind sign-in. */}
+        <Route path="/visit" element={<VisitPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
@@ -40,6 +43,7 @@ export function App() {
   return (
     <>
       <Routes>
+        <Route path="/visit" element={<VisitPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/" element={<RacePage />} />
         <Route path="/log" element={<LogPage />} />

@@ -45,6 +45,28 @@ export function authRoutes({ auth, appOrigin, secureCookies, exposeDevLink }: Au
     return c.redirect(appOrigin)
   })
 
+  /**
+   * Exchange a visitor link token for a read-only session.
+   *
+   * A visitor never signs in: there is no account, no email, and nothing to
+   * reset. The link is the credential, and revoking it ends every session it
+   * ever created because the link is re-checked on each request.
+   */
+  app.post('/visitor', async (c) => {
+    const token = c.req.query('token') ?? (await c.req.json().catch(() => null))?.token
+    if (typeof token !== 'string' || token.length === 0) {
+      return c.json({ error: 'a visitor token is required' }, 400)
+    }
+
+    const result = await auth.startVisitorSession(token)
+    // Revoked, expired and never-existed are one answer on purpose: a caller
+    // learns nothing about which links are real.
+    if (!result) return c.json({ error: 'invalid or revoked link' }, 401)
+
+    setSessionCookie(c, result.sessionToken, { secure: secureCookies })
+    return c.json({ ok: true })
+  })
+
   app.post('/logout', async (c) => {
     const token = getCookie(c, SESSION_COOKIE)
     if (token) await auth.revokeSession(token)

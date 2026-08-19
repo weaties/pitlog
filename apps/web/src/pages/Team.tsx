@@ -7,7 +7,9 @@
  */
 
 import type { SyncRow } from '@pitlog/sync'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { api } from '../lib/api.js'
 import { useCurrentTeam } from '../lib/team.js'
 import { byText, useLocalTable, useRefreshLocal } from '../offline/useLocalTable.js'
 import { useSync } from '../offline/useSync.js'
@@ -94,6 +96,8 @@ export function TeamPage() {
           ))}
         </ul>
       </section>
+
+      {isAdmin && <VisitorLinks teamId={teamId} />}
 
       {editing && (
         <DriverForm
@@ -233,5 +237,109 @@ function DriverForm({
         </Button>
       )}
     </Card>
+  )
+}
+
+interface VisitorLink {
+  id: string
+  label: string
+  expires_at: string | null
+  revoked_at: string | null
+}
+
+/**
+ * Links for family and friends — SPEC §4.
+ *
+ * The token is shown exactly once, at creation, because only its hash is
+ * stored. That is deliberate and worth saying on screen: somebody who loses the
+ * link needs a new one, and a database leak yields nothing usable.
+ */
+function VisitorLinks({ teamId }: { teamId: string }) {
+  const client = useQueryClient()
+  const [label, setLabel] = useState('')
+  const [justCreated, setJustCreated] = useState<string | null>(null)
+
+  const links = useQuery({
+    queryKey: ['visitor-links', teamId],
+    queryFn: () => api<{ links: VisitorLink[] }>(`/api/teams/${teamId}/visitor-links`),
+  })
+
+  const create = useMutation({
+    mutationFn: (newLabel: string) =>
+      api<{ url: string }>(`/api/teams/${teamId}/visitor-links`, {
+        method: 'POST',
+        body: JSON.stringify({ label: newLabel, expiresAt: null }),
+      }),
+    onSuccess: (result) => {
+      setJustCreated(result.url)
+      setLabel('')
+      void client.invalidateQueries({ queryKey: ['visitor-links', teamId] })
+    },
+  })
+
+  const revoke = useMutation({
+    mutationFn: (id: string) =>
+      api<{ revoked: boolean }>(`/api/teams/${teamId}/visitor-links/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['visitor-links', teamId] }),
+  })
+
+  const live = (links.data?.links ?? []).filter((l) => l.revoked_at === null)
+
+  return (
+    <section className="flex flex-col gap-3" data-testid="visitor-links">
+      <h2 className="font-semibold text-pit-muted text-sm uppercase tracking-wide">
+        Visitor links
+      </h2>
+      <p className="text-pit-muted text-sm">
+        Read-only, no account needed. Revoking one ends every session it opened, immediately.
+      </p>
+
+      {justCreated && (
+        <Card className="border-pit-accent/40 bg-pit-accent/10" data-testid="new-visitor-link">
+          <p className="text-sm">Copy this now — it is not shown again.</p>
+          <p className="mt-1 break-all font-mono text-sm">{justCreated}</p>
+        </Card>
+      )}
+
+      <div className="flex gap-2">
+        <Input
+          value={label}
+          placeholder="Who is it for?"
+          aria-label="Visitor link label"
+          onChange={(e) => setLabel(e.target.value)}
+          data-testid="visitor-link-label"
+          className="flex-1"
+        />
+        <Button
+          tone="primary"
+          disabled={label.trim() === '' || create.isPending}
+          data-testid="create-visitor-link"
+          onClick={() => create.mutate(label.trim())}
+        >
+          Create
+        </Button>
+      </div>
+
+      {live.length === 0 ? (
+        <Empty>No visitor links yet.</Empty>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {live.map((link) => (
+            <li key={link.id}>
+              <Card className="flex items-center justify-between gap-3">
+                <span>{link.label}</span>
+                <Button
+                  tone="danger"
+                  data-testid={`revoke-${link.id}`}
+                  onClick={() => revoke.mutate(link.id)}
+                >
+                  Revoke
+                </Button>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
