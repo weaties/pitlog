@@ -15,11 +15,15 @@ const API_PORT = Number(process.env.API_PORT ?? 8787)
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  // Serial in CI: one Postgres, one seeded dataset.
-  ...(process.env.CI ? { workers: 1 } : {}),
+  // One worker, everywhere. There is one Postgres and one seeded dataset, and
+  // the pit client pulls the *whole* team into every browser's IndexedDB — so
+  // parallel tests do not merely race, they read each other's rows. Running
+  // them concurrently locally and serially in CI also meant local runs failed
+  // in ways CI never reproduced, which is worse than being slow.
+  workers: 1,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
