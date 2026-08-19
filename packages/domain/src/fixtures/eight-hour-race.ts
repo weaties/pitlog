@@ -46,7 +46,7 @@ export interface FixtureRace {
   baseLapTimeSeconds: number
 }
 
-export interface PlannedStint {
+export interface FixturePlannedStint {
   sequence: number
   driverKey: string
   startOffsetSeconds: number
@@ -55,16 +55,16 @@ export interface PlannedStint {
   fuelAtEndGallons: number
 }
 
-export interface PlannedFill {
+export interface FixturePlannedFill {
   /** The fill happens in the stop after this stint ends. */
   afterStintSequence: number
   gallons: number
   costCents: number
 }
 
-export interface StintSolution {
-  stints: PlannedStint[]
-  fills: PlannedFill[]
+export interface FixtureStintSolution {
+  stints: FixturePlannedStint[]
+  fills: FixturePlannedFill[]
 }
 
 export interface FixtureLap {
@@ -128,9 +128,9 @@ const STINT_SECONDS = (race.durationSeconds - race.pitStopSeconds * (STINT_COUNT
 /** Fuel price used to derive fill costs, in cents per gallon. */
 const FUEL_PRICE_CENTS_PER_GALLON = 549
 
-function buildSolution(): StintSolution {
-  const stints: PlannedStint[] = []
-  const fills: PlannedFill[] = []
+function buildSolution(): FixtureStintSolution {
+  const stints: FixturePlannedStint[] = []
+  const fills: FixturePlannedFill[] = []
   const burnPerStint = (STINT_SECONDS / HOUR) * race.burnRateGph
 
   let offset = 0
@@ -179,10 +179,10 @@ function round(n: number): number {
 
 export const EIGHT_HOUR_RACE = { race, drivers } as const
 
-export const KNOWN_GOOD_SOLUTION: StintSolution = buildSolution()
+export const KNOWN_GOOD_SOLUTION: FixtureStintSolution = buildSolution()
 
 /** Total seat time per driver key, the fairness metric the planner optimises. */
-export function seatTimeSecondsByDriver(solution: StintSolution): Map<string, number> {
+export function seatTimeSecondsByDriver(solution: FixtureStintSolution): Map<string, number> {
   const seat = new Map<string, number>()
   for (const stint of solution.stints) {
     const length = stint.endOffsetSeconds - stint.startOffsetSeconds
