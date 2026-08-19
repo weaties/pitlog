@@ -1,0 +1,54 @@
+name: CD
+
+# TODO(M0): stubbed deliberately.
+#
+# SPEC §6.4 leaves hosting undecided (Fly.io / Railway are the recommendation,
+# with Cloudflare R2 for object storage). Until Dan picks one, this workflow
+# only proves the app builds a deployable artifact — it does not deploy.
+#
+# When hosting is chosen, the work is:
+#   1. Add the provider's deploy action + a repository environment with secrets.
+#   2. Add a `migrate` step that runs `npm run db:migrate` against the target DB
+#      BEFORE the app rolls, since Drizzle migrations are forward-only.
+#   3. Gate production on a tag; keep `main` auto-deploying to staging.
+# Nothing here may become provider-proprietary beyond the Postgres and S3 APIs
+# (SPEC §6.4 escape hatch).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build artifact (no deploy — hosting undecided, SPEC §6.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Build web bundle
+        run: npm run build -w @pitlog/web
+        env:
+          VITE_API_URL: /api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist/
+          retention-days: 7
+
+  deploy:
+    name: deploy (stub)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Not wired up
+        run: |
+          echo "::notice::CD is stubbed. Hosting is an open decision (SPEC §6.4)."
+          echo "See the TODO at the top of .github/workflows/cd.yml."

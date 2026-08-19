@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.local
+coverage/
+playwright-report/
+test-results/
+.vite/
+.DS_Store
+.claude/worktrees/
+.claude/settings.local.json
+.tsc/
