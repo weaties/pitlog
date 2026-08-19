@@ -16,8 +16,10 @@ export function loadSession(auth: AuthService): MiddlewareHandler<TenancyEnv> {
   return async (c, next) => {
     const token = getCookie(c, SESSION_COOKIE)
     if (token) {
+      // The session says what kind it is; this no longer assumes 'user'.
+      // A visitor session carries the link and the one team it may address.
       const session = await auth.resolveSession(token)
-      if (session) c.set('auth', { ...session, kind: 'user' })
+      if (session) c.set('auth', session)
     }
     await next()
   }

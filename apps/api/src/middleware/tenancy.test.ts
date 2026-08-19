@@ -149,6 +149,19 @@ describe('visitor sessions', () => {
     expect((await app.request(`/teams/${TEAM}/thing`)).status).toBe(200)
   })
 
+  it('needs no membership row at all — the link is the grant', async () => {
+    // A token-scoped visitor has no account. Requiring a membership would make
+    // every shared link 404, which is the reason `visitor_links` exists rather
+    // than a bare `visitor` membership.
+    const app = buildApp({ auth: visitorAuth, memberships: {} })
+    expect((await app.request(`/teams/${TEAM}/thing`)).status).toBe(200)
+  })
+
+  it('is still refused a write with no membership row', async () => {
+    const app = buildApp({ auth: visitorAuth, permission: 'log:write', memberships: {} })
+    expect((await app.request(`/teams/${TEAM}/thing`)).status).toBe(403)
+  })
+
   it('cannot reach a different team even with a membership row there', async () => {
     // A revocable visitor link is scoped to one team (SPEC §4). Honouring a
     // membership row for another team would let a shared link walk sideways.
