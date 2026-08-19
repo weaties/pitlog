@@ -29,8 +29,8 @@ test('a seeded admin can sign in with a magic link and see their team dashboard'
   await devLink.click()
 
   await expect(page).toHaveURL(/localhost:5173\/?$/)
-  await expect(page.getByTestId('team-name')).toHaveText('Rusty Nail Racing')
-  await expect(page.getByTestId('dashboard')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Rusty Nail Racing' })).toBeVisible()
+  await expect(page.getByTestId('events')).toBeVisible()
 })
 
 test('the seeded fixture race shows up on the dashboard', async ({ page }) => {

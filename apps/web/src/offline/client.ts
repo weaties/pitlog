@@ -45,10 +45,12 @@ function transport(teamId: string) {
  * Returns once the write is durable on the device, which is the only thing the
  * caller should ever wait for.
  */
-export async function writeLocal(table: SyncTableName, row: SyncRow): Promise<void> {
+export async function writeLocal<T>(table: SyncTableName, row: SyncRow<T>): Promise<void> {
   await writeRows(table, [row])
   const nextSeq = (await readMeta<number>(SEQ_KEY)) ?? 1
-  const after = await enqueue(idbQueueStorage, nextSeq, [{ table, row }])
+  // The queue is table-agnostic, so rows enter it in their erased form; the
+  // shape was already checked by the caller and is re-checked by the server.
+  const after = await enqueue(idbQueueStorage, nextSeq, [{ table, row: row as unknown as SyncRow }])
   await writeMeta(SEQ_KEY, after)
 }
 
