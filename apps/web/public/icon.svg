@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PitLog">
+  <rect width="512" height="512" rx="112" fill="#12181f"/>
+  <!-- Pit lane: two lines and a box, which is what the app is about. -->
+  <rect x="96" y="150" width="320" height="26" rx="13" fill="#3c4a5a"/>
+  <rect x="96" y="336" width="320" height="26" rx="13" fill="#3c4a5a"/>
+  <rect x="176" y="206" width="160" height="100" rx="20" fill="#f08a24"/>
+  <rect x="206" y="236" width="100" height="40" rx="10" fill="#12181f"/>
+</svg>
