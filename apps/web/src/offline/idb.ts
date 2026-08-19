@@ -16,11 +16,11 @@ import type { PullableTableName, QueuedWrite, QueueStorage, SyncRow } from '@pit
 import { PULLABLE_TABLES } from '@pitlog/sync'
 
 const DB_NAME = 'pitlog'
-// Bumped to 2 when `laps` became readable on the device (#15): tyre life is
-// derived from laps, never typed, so the client needs a local copy.
-const DB_VERSION = 2
 const QUEUE_STORE = '_outbox'
 const META_STORE = '_meta'
+
+/** Every object store the app needs, derived rather than hand-listed. */
+const REQUIRED_STORES = [...PULLABLE_TABLES, QUEUE_STORE, META_STORE] as const
 
 function promisify<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -31,31 +31,59 @@ function promisify<T>(request: IDBRequest<T>): Promise<T> {
 
 let handle: Promise<IDBDatabase> | null = null
 
+/**
+ * Open the local database, creating any store that is missing.
+ *
+ * The obvious implementation is a hand-maintained `DB_VERSION` constant that
+ * somebody remembers to bump. That failed the first time it was tested: adding
+ * a table to the sync list without touching the version left browsers on the
+ * old schema with no store to write to, and every write threw
+ * `NotFoundError` — silently, because nothing was watching.
+ *
+ * So the version is derived from the schema instead. Open once to see what is
+ * actually there; if a store is missing, reopen one version higher and create
+ * it. Adding a table to `PULLABLE_TABLES` is now the whole change.
+ */
 export function openLocalDb(): Promise<IDBDatabase> {
   if (handle) return handle
+  handle = openWithMissingStores()
+  return handle
+}
 
-  handle = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+async function openWithMissingStores(): Promise<IDBDatabase> {
+  const existing = await open(DB_NAME)
+  const missing = REQUIRED_STORES.filter((name) => !existing.objectStoreNames.contains(name))
 
-    request.onupgradeneeded = () => {
-      const db = request.result
-      // One object store per syncable table, keyed on the client-generated id.
-      // Ids are assigned on the device and never renumbered, so the primary
-      // key is stable from the moment a write is made.
-      for (const table of PULLABLE_TABLES) {
-        if (!db.objectStoreNames.contains(table)) db.createObjectStore(table, { keyPath: 'id' })
-      }
-      if (!db.objectStoreNames.contains(QUEUE_STORE)) {
-        db.createObjectStore(QUEUE_STORE, { keyPath: 'seq' })
-      }
-      if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE)
+  if (missing.length === 0) return existing
+
+  const version = existing.version + 1
+  existing.close()
+
+  return open(DB_NAME, version, (db) => {
+    for (const name of missing) {
+      if (db.objectStoreNames.contains(name)) continue
+      // The outbox is keyed by its own sequence; meta is a plain key/value
+      // store; everything else is keyed on the client-generated row id.
+      if (name === QUEUE_STORE) db.createObjectStore(name, { keyPath: 'seq' })
+      else if (name === META_STORE) db.createObjectStore(name)
+      else db.createObjectStore(name, { keyPath: 'id' })
     }
+  })
+}
 
+function open(
+  name: string,
+  version?: number,
+  upgrade?: (db: IDBDatabase) => void,
+): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = version === undefined ? indexedDB.open(name) : indexedDB.open(name, version)
+    request.onupgradeneeded = () => upgrade?.(request.result)
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
+    request.onblocked = () =>
+      reject(new Error('another tab is holding the local database open; close it and reload'))
   })
-
-  return handle
 }
 
 /** Rows a screen should show: soft-deleted rows are excluded, per the skill. */

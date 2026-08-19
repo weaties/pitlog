@@ -1,7 +1,13 @@
 import type { ReactNode } from 'react'
+import { useSyncExternalStore } from 'react'
 import { NavLink } from 'react-router-dom'
 import { SyncStatus } from '../offline/SyncStatus.js'
 import type { SyncState } from '../offline/useSync.js'
+import {
+  clearWriteFailure,
+  getWriteFailure,
+  subscribeToWriteFailures,
+} from '../offline/writeFailures.js'
 
 /**
  * The frame every screen sits in.
@@ -29,6 +35,7 @@ export function Shell({
           {sync && <SyncStatus state={sync} />}
         </div>
       </header>
+      <WriteFailure />
       {children}
     </div>
   )
@@ -68,5 +75,39 @@ export function TabBar() {
         ))}
       </ul>
     </nav>
+  )
+}
+
+/**
+ * A local write that threw.
+ *
+ * Loud on purpose. "Offline" is routine and gets a quiet pill; "this device
+ * would not store what you just typed" is not routine, and a crew that does
+ * not know it happened will keep tapping.
+ */
+function WriteFailure() {
+  const failure = useSyncExternalStore(subscribeToWriteFailures, getWriteFailure, () => null)
+  if (!failure) return null
+
+  return (
+    <div
+      role="alert"
+      data-testid="write-failure"
+      className="flex flex-col gap-2 rounded-xl border border-red-400/40 bg-red-500/15 p-4"
+    >
+      <p className="font-semibold text-red-100">That did not save to this device.</p>
+      <p className="text-red-200 text-sm">{failure}</p>
+      <p className="text-red-200/80 text-sm">
+        Reload the page. If it keeps happening, write it on the whiteboard and tell whoever is
+        carrying the laptop.
+      </p>
+      <button
+        type="button"
+        onClick={clearWriteFailure}
+        className="min-h-tap self-start rounded-lg border border-red-300/30 px-4 text-red-100"
+      >
+        Dismiss
+      </button>
+    </div>
   )
 }
