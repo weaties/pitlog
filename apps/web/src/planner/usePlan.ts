@@ -18,6 +18,7 @@ import type {
 import {
   estimateBurnRate,
   evaluatePitNow,
+  inRunningOrder,
   parseSeriesRules,
   replanFromNow,
   solveStintPlan,
@@ -78,6 +79,7 @@ interface SessionRow {
 interface DriverRow {
   first_name: string
   can_drive: boolean
+  sort_order: number | null
   min_stint_seconds: number | null
   max_stint_seconds: number | null
   burn_rate_factor: string | null
@@ -128,7 +130,9 @@ export function usePlan(teamId: string | undefined): PlanView {
 
   const event = (events.data ?? [])[0]
   const session = (sessions.data ?? []).find((s) => s.event_id === event?.id)
-  const roster = (drivers.data ?? []).filter((d) => d.can_drive)
+  // Ordered here, once. The solver's last tiebreak is roster order, and
+  // handing it IndexedDB key order would make it arbitrary — see #56.
+  const roster = inRunningOrder((drivers.data ?? []).filter((d) => d.can_drive))
 
   const driverName = (id: string | null) =>
     (drivers.data ?? []).find((d) => d.id === id)?.first_name ?? 'Unknown'

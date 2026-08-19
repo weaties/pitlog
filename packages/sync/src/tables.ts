@@ -121,6 +121,8 @@ export const SYNC_TABLE_SCHEMAS = {
     min_stint_seconds: optionalInt,
     max_stint_seconds: optionalInt,
     burn_rate_factor: optionalDecimal,
+    /** The crew's running order. Null sorts last — see the db schema. */
+    sort_order: optionalInt,
     notes: optionalText,
   }),
   stints: table({

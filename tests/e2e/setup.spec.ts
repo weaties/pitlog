@@ -73,3 +73,36 @@ test('a crew member can edit the roster but a visitor cannot', async ({ page }) 
   await expect(page.getByTestId('roster')).toBeVisible()
   await expect(page.getByTestId('add-driver')).toHaveCount(0)
 })
+
+test('the crew chooses the running order, and the plan follows it', async ({ page }) => {
+  // Before #56 the planner's "roster order" tiebreak was whatever order rows
+  // came out of IndexedDB in — primary-key order over client-generated UUIDs.
+  // Who started the race was effectively arbitrary. This proves it is not.
+  await signIn(page, 'admin@example.com')
+  await page.getByRole('link', { name: 'Team' }).click()
+
+  const rows = page.getByTestId('roster').getByRole('listitem')
+  // Rows are numbered by position, so strip the number to compare names.
+  const nameAt = async (i: number) =>
+    ((await rows.nth(i).innerText()).split('\n')[0] ?? '').replace(/^\d+\.\s*/, '').trim()
+
+  const before = await nameAt(0)
+  const promoting = await nameAt(1)
+  expect(promoting).not.toBe(before)
+
+  await rows
+    .nth(1)
+    .getByRole('button', { name: /Move .* up/ })
+    .click()
+  await expect.poll(() => nameAt(0)).toBe(promoting)
+
+  // The order survives a reload, so it is stored rather than a view quirk.
+  await page.reload()
+  await page.getByRole('link', { name: 'Team' }).click()
+  await expect.poll(() => nameAt(0)).toBe(promoting)
+
+  // And the plan agrees: the first stint goes to whoever is now at the top.
+  await page.getByRole('link', { name: 'Plan' }).click()
+  const firstStint = page.getByTestId('schedule').getByRole('listitem').first()
+  await expect(firstStint).toContainText(promoting.split(' ')[0] ?? '')
+})

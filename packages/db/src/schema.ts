@@ -345,6 +345,19 @@ export const drivers = pgTable(
     max_stint_seconds: integer('max_stint_seconds'),
     /** Multiplier on the team burn rate once enough data exists — SPEC §5.1. */
     burn_rate_factor: numeric('burn_rate_factor', { precision: 5, scale: 3 }),
+    /**
+     * Where this driver sits in the running order the crew chose.
+     *
+     * The planner's last tiebreak is "roster order" (AGENTS.md → Decisions),
+     * and before this column that meant whatever order the rows happened to
+     * come back in — primary-key order, and the keys are client-generated
+     * UUIDs. So who started the race was effectively arbitrary. This makes the
+     * order a thing the crew owns.
+     *
+     * Null sorts last, so a driver added mid-weekend does not silently jump
+     * the queue.
+     */
+    sort_order: integer('sort_order'),
     notes: text('notes'),
     ...syncColumns,
   },
