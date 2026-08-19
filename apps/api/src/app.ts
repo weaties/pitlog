@@ -8,6 +8,7 @@ import { loadSession } from './middleware/session.js'
 import type { TenancyEnv } from './middleware/tenancy.js'
 import { requireAuth } from './middleware/tenancy.js'
 import { authRoutes } from './routes/auth.js'
+import { syncRoutes } from './routes/sync.js'
 import { teamRoutes } from './routes/teams.js'
 
 export interface AppOptions {
@@ -52,6 +53,7 @@ export function createApp(options: AppOptions) {
     }),
   )
   app.route('/api/teams', teamRoutes({ db, resolveMembership }))
+  app.route('/api/teams', syncRoutes({ db, resolveMembership }))
 
   return app
 }
