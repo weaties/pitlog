@@ -48,71 +48,73 @@ integration.
 
 - [ ] **Burn-rate model.** Rolling estimate from (fill volume ÷ elapsed since
       last full tank). Only `filled_to_full` fills are datapoints. Returns an
-      estimate *with* a confidence and the inputs it used — never a bare number.
+      estimate *with* a confidence and the inputs it used — never a bare number. — #3
 - [ ] **Per-driver burn adjustment.** Applies `drivers.burn_rate_factor` once
-      there is enough data to justify one; states when there is not.
+      there is enough data to justify one; states when there is not. — #4
 - [ ] **Stint solver v1.** Inputs: race length, fuel capacity, burn rate, driver
       roster with min/max seat time, rule config, pit overhead, fairness weight.
       Output: who, when in/out, expected fuel state, fill volume per stop.
-      Must reproduce `KNOWN_GOOD_SOLUTION` exactly on the fixture race.
+      Must reproduce `KNOWN_GOOD_SOLUTION` exactly on the fixture race. — #5
 - [ ] **Rule-config enforcement in the solver.** Consumes `pit`, `fueling`, and
-      `driver` constraints as data. No `switch` on `series_key`.
+      `driver` constraints as data. No `switch` on `series_key`. — #6
 - [ ] **UNVERIFIED banner.** Any plan built on a config with unverified fields
-      says so on screen, listing which inputs are guesses (SPEC §5.1).
-- [ ] **Live replanning.** Re-solve from "now" against logged actuals.
+      says so on screen, listing which inputs are guesses (SPEC §5.1). — #7
+- [ ] **Live replanning.** Re-solve from "now" against logged actuals. — #8
 - [ ] **"Pit now?" what-if.** Re-solve with an immediate stop, show the delta
-      against the current plan.
-- [ ] **Planner UI.** Schedule view, per-stop fill volumes, assumptions panel.
+      against the current plan. — #9
+- [ ] **Planner UI.** Schedule view, per-stop fill volumes, assumptions panel. — #10
 
 ### Race-weekend logging (SPEC §5.2)
 
 - [ ] **One-tap log screen.** Driver in / out, fuel fill, tire change, tire
       rotation, brake pad change, incident, black flag, note. Gloves-and-sunlight
-      sizing — nothing below the `--spacing-tap` minimum.
+      sizing — nothing below the `--spacing-tap` minimum. — #11
 - [ ] **Fuel fill entry.** Gallons + cost + `filled_to_full`, feeding the
-      burn-rate model.
-- [ ] **Stint start/end capture,** wired to the planner's actuals.
+      burn-rate model. — #12
+- [ ] **Stint start/end capture,** wired to the planner's actuals. — #13
 - [ ] **Edit with history.** Every entry attributable and editable; the previous
-      value stays visible.
-- [ ] **Consumables tracking.** Tire sets and pads: laps and hours on set.
+      value stays visible. — #14
+- [ ] **Consumables tracking.** Tire sets and pads: laps and hours on set. — #15
 
 ### Expenses (SPEC §5.3)
 
 - [ ] **Expense entry** — amount (integer cents), category, payer, optional
-      event association.
-- [ ] **Receipt photo capture,** working offline; row syncs before the blob.
+      event association. — #16
+- [ ] **Receipt photo capture,** working offline; row syncs before the blob. — #17
 - [ ] **Cost splitting** — even split or custom shares; shares must sum to the
-      parent expense.
-- [ ] **Who-owes-whom ledger** with settle-up marks (admin only).
+      parent expense. — #18
+- [ ] **Who-owes-whom ledger** with settle-up marks (admin only). — #19
 - [ ] **Object storage for receipt blobs** — *blocked on SPEC §6.4* (Cloudflare
-      R2 is the recommendation).
+      R2 is the recommendation). — #17
 
 ### Offline sync (SPEC §6.2)
 
 See the `offline-sync` skill for the design and its guardrails.
 
 - [ ] **`packages/sync` merge logic**, TDD'd with no browser or database:
-      remote-newer, local-newer, tie-break, delete-vs-edit, unseen row, replay.
-- [ ] **IndexedDB local store** in `apps/web`.
-- [ ] **Outbound queue** with retry; a write made offline survives a reload.
-- [ ] **Server-side apply endpoint** honouring LWW on `client_updated_at`.
+      remote-newer, local-newer, tie-break, delete-vs-edit, unseen row, replay. — #20
+- [ ] **IndexedDB local store** in `apps/web`. — #21
+- [ ] **Outbound queue** with retry; a write made offline survives a reload. — #22
+- [ ] **Server-side apply endpoint** honouring LWW on `client_updated_at`. — #23
 - [ ] **Conflict surfacing UI** — the losing value is shown, never discarded
-      silently.
-- [ ] **Service worker shell caching**; API responses are never SW-cached.
+      silently. — #24
+- [ ] **Service worker shell caching**; API responses are never SW-cached. — #25
 
 ### Visitor dashboard (SPEC §4)
 
-- [ ] **Token-scoped visitor links** — create, label, revoke.
-- [ ] **Read-only weekend view:** stint schedule, lap times, standings.
+- [ ] **Token-scoped visitor links** — create, label, revoke. — #26
+- [ ] **Read-only weekend view:** stint schedule, lap times, standings. — #27
 - [ ] **First names only.** No PII beyond driver first names in any
-      visitor-facing response.
+      visitor-facing response. — #27
 
 ### Auth + team management
 
 - [ ] **SMTP mail transport** (console-only in M0). Needs a sending domain —
-      *touches the SPEC §6.4 hosting decision.*
-- [ ] **Invite flow** — admin invites by email with a role.
-- [ ] **Team settings + driver roster CRUD** (admin).
+      *touches the SPEC §6.4 hosting decision.* — #28
+- [ ] **Invite flow** — admin invites by email with a role. — #29
+- [ ] **Team settings + driver roster CRUD** (admin). — #30
+
+M1 tasks are tracked as GitHub issues (#3–#30), labelled by area. `gh issue list --label M1`.
 
 ### Blocking open items (SPEC §3, owner: Dan)
 
