@@ -14,4 +14,5 @@
 export * from './apply.js'
 export * from './merge.js'
 export * from './protocol.js'
+export * from './queue.js'
 export * from './tables.js'

@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Dashboard as DashboardData, Team } from '../lib/api.js'
 import { api } from '../lib/api.js'
+import { SyncStatus } from '../offline/SyncStatus.js'
+import { useSync } from '../offline/useSync.js'
 
 /**
  * The weekend dashboard. M0 renders the shell and the empty state; M1 fills it
@@ -20,6 +22,8 @@ export function Dashboard() {
     enabled: Boolean(teamId),
   })
 
+  const sync = useSync(teamId)
+
   if (teams.isPending) return <Shell>Loading…</Shell>
 
   if (!teams.data?.teams.length) {
@@ -38,11 +42,14 @@ export function Dashboard() {
         <h1 className="font-bold text-3xl tracking-tight" data-testid="team-name">
           {dashboard.data?.team.name ?? teams.data.teams[0]?.name}
         </h1>
-        {dashboard.data && (
-          <span className="rounded-full bg-pit-surface px-3 py-1 text-pit-muted text-sm">
-            {dashboard.data.role}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          <SyncStatus state={sync} />
+          {dashboard.data && (
+            <span className="rounded-full bg-pit-surface px-3 py-1 text-pit-muted text-sm">
+              {dashboard.data.role}
+            </span>
+          )}
+        </div>
       </header>
 
       {dashboard.isPending && <p className="text-pit-muted">Loading dashboard…</p>}
