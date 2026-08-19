@@ -1,7 +1,9 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: pitlog-postgres
+    # Deliberately no container_name: Compose derives one from the directory, so
+    # two checkouts — or two agent worktrees, which AGENTS.md encourages — do
+    # not collide on a fixed name. Reach it with `docker compose exec postgres`.
     restart: unless-stopped
     environment:
       POSTGRES_USER: pitlog
