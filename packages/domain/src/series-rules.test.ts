@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  minDriversForRace,
   parseSeriesRules,
+  RULE_FIELD_PATHS,
   SERIES_RULES_SCHEMA_VERSION,
   seriesRulesConfigSchema,
   unverifiedFields,
@@ -33,7 +35,8 @@ const minimal = {
     min_stint_seconds: 1800,
     max_stint_seconds: 7200,
     max_consecutive_stint_seconds: 7200,
-    min_drivers_per_event: 2,
+    min_rest_seconds: 3600,
+    min_drivers_per_event: [{ min_race_hours: 0, drivers: 2 }],
     max_share_of_race: 0.6,
   },
 }
@@ -69,6 +72,42 @@ describe('seriesRulesConfigSchema', () => {
         driver: { ...minimal.driver, min_stint_seconds: 3600, max_stint_seconds: 1800 },
       }),
     ).toThrow(/max_stint_seconds/)
+  })
+
+  it('accepts null for a limit the series does not impose', () => {
+    // Null is a *checked* answer — 24 Hours of Lemons imposes no minimum stop
+    // and no stint limits at all. Forcing a number here is how a planner ends
+    // up enforcing a rule nobody wrote.
+    const cfg = parseSeriesRules({
+      ...minimal,
+      pit: { ...minimal.pit, min_stop_seconds: null },
+      driver: {
+        ...minimal.driver,
+        min_stint_seconds: null,
+        max_stint_seconds: null,
+        max_consecutive_stint_seconds: null,
+        min_rest_seconds: null,
+        max_share_of_race: null,
+      },
+    })
+
+    expect(cfg.pit.min_stop_seconds).toBeNull()
+    expect(cfg.driver.max_stint_seconds).toBeNull()
+  })
+
+  it('does not compare stint bounds when either is unimposed', () => {
+    expect(() =>
+      parseSeriesRules({
+        ...minimal,
+        driver: { ...minimal.driver, min_stint_seconds: 3600, max_stint_seconds: null },
+      }),
+    ).not.toThrow()
+  })
+
+  it('requires at least one driver-count tier', () => {
+    expect(() =>
+      parseSeriesRules({ ...minimal, driver: { ...minimal.driver, min_drivers_per_event: [] } }),
+    ).toThrow()
   })
 
   it('rejects a max_share_of_race outside (0,1]', () => {
@@ -135,8 +174,30 @@ describe('shipped series configs (config/series/*.yaml)', () => {
         expect(() => parseSeriesRules(raw)).not.toThrow()
       })
 
-      it('is marked UNVERIFIED — SPEC §3 leaves real rule values unresolved', () => {
-        expect(parseSeriesRules(raw).verification.status).toBe('UNVERIFIED')
+      it('never claims verification without a source', () => {
+        // AGENTS.md: "Never move status without a source." This is the rule
+        // that keeps a plausible-looking guess from being promoted to a fact,
+        // and it matters more now that some configs really are checked.
+        const { verification } = parseSeriesRules(raw)
+        if (verification.status === 'UNVERIFIED') return
+
+        expect(verification.source, `${file} claims ${verification.status}`).toBeTruthy()
+        expect(verification.checked_at).toBeTruthy()
+      })
+
+      it('only lists real rule fields as verified', () => {
+        // A typo in verified_fields would silently suppress the on-screen
+        // warning for a field that was never actually checked.
+        for (const field of parseSeriesRules(raw).verification.verified_fields) {
+          expect(RULE_FIELD_PATHS, `${file} lists unknown field ${field}`).toContain(field)
+        }
+      })
+
+      it('lists a verified field for every value it claims to have checked', () => {
+        const config = parseSeriesRules(raw)
+        if (config.verification.status === 'UNVERIFIED') {
+          expect(config.verification.verified_fields).toEqual([])
+        }
       })
 
       it('has a series_key matching its filename', () => {
@@ -149,5 +210,43 @@ describe('shipped series configs (config/series/*.yaml)', () => {
 describe('seriesRulesConfigSchema export', () => {
   it('is the zod schema, exported so callers can compose it', () => {
     expect(seriesRulesConfigSchema.safeParse(minimal).success).toBe(true)
+  })
+})
+
+describe('minDriversForRace', () => {
+  const tiered = parseSeriesRules({
+    ...minimal,
+    driver: {
+      ...minimal.driver,
+      // ChampCar's actual shape: 2 up to 8 h, 3 from 9, 4 from 17.
+      min_drivers_per_event: [
+        { min_race_hours: 0, drivers: 2 },
+        { min_race_hours: 9, drivers: 3 },
+        { min_race_hours: 17, drivers: 4 },
+      ],
+    },
+  })
+
+  it('takes the base tier for a short race', () => {
+    expect(minDriversForRace(tiered, 8 * 3600)).toBe(2)
+  })
+
+  it('takes the longest tier the race reaches, not the first it satisfies', () => {
+    // A 24-hour race satisfies every tier; the answer is the strictest.
+    expect(minDriversForRace(tiered, 24 * 3600)).toBe(4)
+  })
+
+  it('steps up at each boundary', () => {
+    expect(minDriversForRace(tiered, 9 * 3600)).toBe(3)
+    expect(minDriversForRace(tiered, 16.5 * 3600)).toBe(3)
+    expect(minDriversForRace(tiered, 17 * 3600)).toBe(4)
+  })
+
+  it('falls back to one driver when no tier applies', () => {
+    const late = parseSeriesRules({
+      ...minimal,
+      driver: { ...minimal.driver, min_drivers_per_event: [{ min_race_hours: 12, drivers: 3 }] },
+    })
+    expect(minDriversForRace(late, 4 * 3600)).toBe(1)
   })
 })

@@ -19,7 +19,14 @@ import { z } from 'zod'
 
 export const SERIES_RULES_SCHEMA_VERSION = 1
 
-const positiveSeconds = z.int().positive()
+/**
+ * A limit the series may simply not impose.
+ *
+ * Null means "no such rule", which is a *checked* answer, not a missing one.
+ * Forcing a number here is how a planner ends up enforcing a 30-minute minimum
+ * stint that no rulebook ever asked for — and then refusing legal schedules.
+ */
+const unimposedSeconds = z.int().positive().nullable().default(null)
 const optionalPositive = z.number().positive().nullable().default(null)
 
 const verificationSchema = z
@@ -42,8 +49,14 @@ const verificationSchema = z
 
 const pitSchema = z
   .object({
-    /** Minimum time the car must be stationary in the box. */
-    min_stop_seconds: positiveSeconds,
+    /**
+     * Minimum time a stop must take. Null where the series imposes none.
+     *
+     * Series differ in what they are timing: ChampCar measures pit-in to
+     * pit-out, which includes pit-lane transit, so treating it as stationary
+     * time is conservative by however long the lane takes.
+     */
+    min_stop_seconds: unimposedSeconds,
     engine_off_for_fueling: z.boolean(),
     driver_in_car_during_fueling: z.boolean(),
     driver_change_during_fueling: z.boolean(),
@@ -55,29 +68,54 @@ const fuelingSchema = z
   .object({
     /** Series-imposed cap on tank size, independent of the car's actual tank. */
     max_fuel_capacity_gallons: optionalPositive,
-    refuel_allowed_under_yellow: z.boolean(),
+    /** Null where the rulebook does not address it — see `verified_fields`. */
+    refuel_allowed_under_yellow: z.boolean().nullable().default(null),
     /** True where fuel must come from cans rather than a rig/pump. */
     fuel_can_only: z.boolean(),
     max_can_size_gallons: optionalPositive,
   })
   .strict()
 
+/**
+ * How many drivers an entry needs, which every series makes a function of race
+ * length rather than a constant. Tiers are read longest-first: the first tier
+ * whose `min_race_hours` the race meets or exceeds is the one that applies.
+ */
+const driverCountTierSchema = z
+  .object({
+    /** 0 for the base tier that always applies. */
+    min_race_hours: z.number().nonnegative(),
+    drivers: z.int().positive(),
+  })
+  .strict()
+
 const driverFields = {
-  min_stint_seconds: positiveSeconds,
-  max_stint_seconds: positiveSeconds,
-  max_consecutive_stint_seconds: positiveSeconds,
-  min_drivers_per_event: z.int().positive(),
+  min_stint_seconds: unimposedSeconds,
+  max_stint_seconds: unimposedSeconds,
+  max_consecutive_stint_seconds: unimposedSeconds,
+  /**
+   * Rest a driver must take before going back out. Both Lucky Dog and ChampCar
+   * impose 60 minutes; it binds hard on a two-driver entry.
+   */
+  min_rest_seconds: unimposedSeconds,
+  min_drivers_per_event: z.array(driverCountTierSchema).min(1),
   /** Cap on one driver's share of total race time, as a fraction in (0,1]. */
-  max_share_of_race: z.number().gt(0).lte(1),
+  max_share_of_race: z.number().gt(0).lte(1).nullable().default(null),
 } as const
 
 const driverSchema = z
   .object(driverFields)
   .strict()
-  .refine((d) => d.max_stint_seconds >= d.min_stint_seconds, {
-    message: 'max_stint_seconds must be >= min_stint_seconds',
-    path: ['max_stint_seconds'],
-  })
+  .refine(
+    (d) =>
+      d.max_stint_seconds === null ||
+      d.min_stint_seconds === null ||
+      d.max_stint_seconds >= d.min_stint_seconds,
+    {
+      message: 'max_stint_seconds must be >= min_stint_seconds',
+      path: ['max_stint_seconds'],
+    },
+  )
 
 export const seriesRulesConfigSchema = z
   .object({
@@ -121,6 +159,21 @@ export function parseSeriesRules(input: string | unknown): SeriesRulesConfig {
  * The planner must surface these; SPEC §5.1 requires showing assumptions
  * rather than a bare number.
  */
+/**
+ * How many drivers this race needs, given its length.
+ *
+ * Longest tier first, so a 24-hour race picks up the 24-hour requirement rather
+ * than the base one it also satisfies.
+ */
+export function minDriversForRace(config: SeriesRulesConfig, raceSeconds: number): number {
+  const hours = raceSeconds / 3600
+  const applicable = [...config.driver.min_drivers_per_event]
+    .filter((tier) => hours >= tier.min_race_hours)
+    .sort((a, b) => b.min_race_hours - a.min_race_hours)
+
+  return applicable[0]?.drivers ?? 1
+}
+
 export function unverifiedFields(config: SeriesRulesConfig): string[] {
   if (config.verification.status === 'VERIFIED') return []
   const verified = new Set(config.verification.verified_fields)

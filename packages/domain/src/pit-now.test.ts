@@ -177,7 +177,8 @@ describe('evaluatePitNow — when there is no choice', () => {
         min_stint_seconds: 30 * MINUTE,
         max_stint_seconds: 90 * MINUTE,
         max_consecutive_stint_seconds: 90 * MINUTE,
-        min_drivers_per_event: 2,
+        min_rest_seconds: null,
+        min_drivers_per_event: [{ min_race_hours: 0, drivers: 2 }],
         max_share_of_race: 1,
       },
     })

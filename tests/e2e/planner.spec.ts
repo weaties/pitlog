@@ -25,7 +25,7 @@ test('the seeded race produces a schedule', async ({ page }) => {
   expect(await stints.count()).toBeGreaterThan(1)
 })
 
-test('a plan built on placeholder rules says so, by name', async ({ page }) => {
+test('a plan still built on an unchecked rule value says so, by name', async ({ page }) => {
   await openPlan(page)
 
   const banner = page.getByTestId('unverified-banner')
@@ -36,7 +36,27 @@ test('a plan built on placeholder rules says so, by name', async ({ page }) => {
   await expect(banner).toContainText('unverified rule value')
   const fields = page.getByTestId('unverified-fields').getByRole('listitem')
   expect(await fields.count()).toBeGreaterThan(0)
-  await expect(page.getByTestId('unverified-fields')).toContainText('driver.max_stint_seconds')
+})
+
+test('fields that were read from a rulebook stop being flagged', async ({ page }) => {
+  await openPlan(page)
+
+  // The configs were checked against the published rulebooks on 2026-08-19, so
+  // the banner must have shrunk to the handful the rulebooks do not address.
+  // If this ever fails, either a config regressed to placeholders or somebody
+  // widened verified_fields without reading anything.
+  const listed = await page.getByTestId('unverified-fields').innerText()
+
+  for (const checked of [
+    'pit.engine_off_for_fueling',
+    'pit.driver_change_during_fueling',
+    'fueling.max_can_size_gallons',
+    'driver.max_consecutive_stint_seconds',
+  ]) {
+    expect(listed, `${checked} was read from a rulebook and should not be flagged`).not.toContain(
+      checked,
+    )
+  }
 })
 
 test('the banner is on the plan itself, not behind a tooltip', async ({ page }) => {

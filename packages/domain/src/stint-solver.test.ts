@@ -61,7 +61,8 @@ function rules(overrides: {
       min_stint_seconds: 30 * MINUTE,
       max_stint_seconds: 2 * HOUR,
       max_consecutive_stint_seconds: 2 * HOUR,
-      min_drivers_per_event: 2,
+      min_rest_seconds: null,
+      min_drivers_per_event: [{ min_race_hours: 0, drivers: 2 }],
       max_share_of_race: 1,
       ...overrides.driver,
     },
@@ -402,7 +403,7 @@ describe('solveStintPlan — rule configs are data', () => {
       solveStintPlan(
         baseInput({
           drivers: [driver('a')],
-          rules: rules({ driver: { min_drivers_per_event: 2 } }),
+          rules: rules({ driver: { min_drivers_per_event: [{ min_race_hours: 0, drivers: 2 }] } }),
         }),
       ),
     )
@@ -429,7 +430,10 @@ describe('solveStintPlan — rule configs are data', () => {
           raceSeconds: 3 * HOUR,
           drivers: [driver('a')],
           rules: rules({
-            driver: { min_drivers_per_event: 1, max_consecutive_stint_seconds: HOUR },
+            driver: {
+              min_drivers_per_event: [{ min_race_hours: 0, drivers: 1 }],
+              max_consecutive_stint_seconds: HOUR,
+            },
           }),
         }),
       ),
@@ -558,5 +562,106 @@ describe('solveStintPlan — input validation', () => {
 
   it('rejects a negative pit stop', () => {
     expect(() => solveStintPlan(baseInput({ pitStopSeconds: -1 }))).toThrow(/pit/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Rules the real rulebooks turned out to contain — see config/series/*.yaml
+// ---------------------------------------------------------------------------
+
+describe('solveStintPlan — the rest requirement', () => {
+  /** Lucky Dog and ChampCar both require 60 minutes out of the car. */
+  const withRest = rules({ driver: { min_rest_seconds: 3600, max_stint_seconds: 2 * HOUR } })
+
+  it('never sends a driver back out before they have rested', () => {
+    const plan = expectOk(
+      solveStintPlan(baseInput({ raceSeconds: 8 * HOUR, rules: withRest, fairnessWeight: 0 })),
+    )
+
+    const lastEnd = new Map<string, number>()
+    for (const stint of plan.stints) {
+      const previous = lastEnd.get(stint.driverId)
+      if (previous !== undefined) {
+        expect(stint.startOffsetSeconds - previous).toBeGreaterThanOrEqual(3600)
+      }
+      lastEnd.set(stint.driverId, stint.endOffsetSeconds)
+    }
+  })
+
+  it('refuses when a roster is too small to rest and still cover the race', () => {
+    // Two drivers on a tank that only lasts 40 minutes cannot alternate: each
+    // would be back in the car twenty minutes early.
+    const failure = expectFailure(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 6 * HOUR,
+          fuelCapacityGallons: 11,
+          drivers: [driver('a'), driver('b')],
+          rules: withRest,
+        }),
+      ),
+    )
+
+    expect(failure.reason).toBe('stint_bounds_unsatisfiable')
+  })
+
+  it('is untroubled by a series that asks for no rest', () => {
+    // 24 Hours of Lemons imposes none, so the same roster is fine.
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 6 * HOUR,
+          fuelCapacityGallons: 11,
+          drivers: [driver('a'), driver('b')],
+          rules: rules({ driver: { min_rest_seconds: null } }),
+        }),
+      ),
+    )
+
+    expect(plan.stints.length).toBeGreaterThan(2)
+  })
+})
+
+describe('solveStintPlan — driver counts are a function of race length', () => {
+  /** ChampCar's actual tiers: 2 up to 8 h, 3 from 9, 4 from 17. */
+  const champcarish = rules({
+    driver: {
+      min_drivers_per_event: [
+        { min_race_hours: 0, drivers: 2 },
+        { min_race_hours: 9, drivers: 3 },
+        { min_race_hours: 17, drivers: 4 },
+      ],
+    },
+  })
+
+  it('lets two drivers take an eight-hour race', () => {
+    const plan = expectOk(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 8 * HOUR,
+          drivers: [driver('a'), driver('b')],
+          rules: champcarish,
+        }),
+      ),
+    )
+    expect(plan.stints.length).toBeGreaterThan(0)
+  })
+
+  it('refuses the same two drivers a twelve-hour race', () => {
+    const failure = expectFailure(
+      solveStintPlan(
+        baseInput({
+          raceSeconds: 12 * HOUR,
+          drivers: [driver('a'), driver('b')],
+          rules: champcarish,
+        }),
+      ),
+    )
+
+    expect(failure.reason).toBe('insufficient_drivers_for_rules')
+    // The message names the race length, because "you need 3" is not actionable
+    // without saying why it changed.
+    expect(failure.detail).toMatch(/12\.0 h/)
+    expect(failure.detail).toMatch(/3 drivers/)
   })
 })

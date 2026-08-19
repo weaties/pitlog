@@ -33,10 +33,13 @@ Milestones and open work: [`ROADMAP.md`](ROADMAP.md).
 - **Every query filters on `team_id`.** Team is the tenancy boundary (SPEC §4).
   There is deliberately no ambient tenant in the db client, so a missing scope
   is visible in the query rather than hidden in a wrapper. See `/data-model`.
-- **Series rule values are UNVERIFIED.** SPEC §3 leaves the real Lemons /
-  Lucky Dog / ChampCar rules unresolved. The shipped configs are structurally
-  valid placeholders. **Do not invent real rule values**, and do not "improve"
-  the placeholders by guessing. See `/series-rules`.
+- **Never invent a series rule value.** The shipped Lemons / Lucky Dog /
+  ChampCar configs were read from the published rulebooks on 2026-08-19 and
+  carry citations, but each is `PARTIAL`: a few fields those rulebooks simply do
+  not address are still unverified and still flagged on screen. Fill one in only
+  from a rulebook, with a `verification.source`, and never by guessing. A `null`
+  in a config means "this series imposes no such rule" — a checked answer, not a
+  gap to be filled with a plausible number. See `/series-rules`.
 - **Work in a git worktree when agents run in parallel.** Two agents sharing a
   checkout collide on uncommitted changes and branch switches, and migration
   version numbers collide silently. Read-only work doesn't need one.
@@ -368,13 +371,11 @@ re-merges; the cost of being wrong is a fill that never arrives.
 
 These are not agent decisions. If a task needs one, say so and stop.
 
-- Per-series rule details for Lemons / Lucky Dog / ChampCar — **blocks
-  verifying any rule config, and blocks trusting any planner output.**
-- Fall target race + date — drives the M1 cut line.
+- **Which series the fall race runs under.** The rules themselves are now read
+  and encoded; what is missing is which config the event should point at.
 - Hosting choice (SPEC §6.4) — blocks CD.
 - GPS logger make/model and format; IMU part; whether the car has OBD2 — M2/M3.
 - YouTube account and default visibility; clapper time source — M2.
-- Project name.
 
 ## Where to look next
 

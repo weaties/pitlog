@@ -17,6 +17,10 @@ const HOUR_SECONDS = 3600
  * round robin, which is what a crew would write on the whiteboard.
  */
 export function assignDrivers(a: ScheduleContext, nominal: number): PlannerDriver[] | null {
+  // Both Lucky Dog and ChampCar require 60 minutes out of the car between
+  // stints. It binds hardest on a small roster: two drivers on short stints
+  // cannot legally alternate, however fair the split looks.
+  const restSeconds = a.rules?.driver.min_rest_seconds ?? 0
   // Seat time starts from what has already been driven, not from zero: that is
   // what makes replanning fair across the whole race rather than the remainder.
   const seat = new Map<string, number>(
@@ -38,6 +42,12 @@ export function assignDrivers(a: ScheduleContext, nominal: number): PlannerDrive
 
     const previous = assigned.at(-1)
     const candidates = a.eligible.filter((driver) => {
+      if (
+        restSeconds > 0 &&
+        !hasRested(assigned, driver, index, nominal, a.pitStopSeconds, restSeconds)
+      ) {
+        return false
+      }
       if (driver.id !== previous?.id) return nominal <= cap
       // Consecutive stints accumulate: a pit stop is not a rest if the driver
       // never got out. This reading of an UNVERIFIED field is the conservative
@@ -59,6 +69,30 @@ export function assignDrivers(a: ScheduleContext, nominal: number): PlannerDrive
   return assigned
 }
 
+/**
+ * Whether this driver has been out of the car long enough to go back in.
+ *
+ * Measured from the end of their last stint to the start of this one, across
+ * the stints and stops in between. Nominal lengths are used because assignment
+ * runs before lengths are settled; the check is repeated against real lengths
+ * once they are.
+ */
+function hasRested(
+  assigned: readonly PlannerDriver[],
+  driver: PlannerDriver,
+  index: number,
+  nominal: number,
+  pitStopSeconds: number,
+  restSeconds: number,
+): boolean {
+  const last = assigned.findLastIndex((d) => d.id === driver.id)
+  if (last === -1) return true
+
+  // Stints strictly between their last one and this one, plus every stop.
+  const between = index - last - 1
+  return between * nominal + (index - last) * pitStopSeconds >= restSeconds
+}
+
 /** Seconds the trailing driver has been in the car without getting out. */
 function consecutiveRun(assigned: readonly PlannerDriver[], nominal: number): number {
   const last = assigned.at(-1)
@@ -68,6 +102,35 @@ function consecutiveRun(assigned: readonly PlannerDriver[], nominal: number): nu
   return run
 }
 
+/**
+ * Re-check the rest requirement against real lengths.
+ *
+ * Assignment only ever saw the nominal split, and water-filling can shorten the
+ * stints that were supposed to be somebody's rest.
+ */
+export function withinRestRequirement(
+  a: ScheduleContext,
+  assigned: readonly PlannerDriver[],
+  lengths: readonly number[],
+): boolean {
+  const restSeconds = a.rules?.driver.min_rest_seconds
+  if (!restSeconds) return true
+
+  const lastSeen = new Map<string, number>()
+  let clock = 0
+
+  for (const [index, driver] of assigned.entries()) {
+    const previousEnd = lastSeen.get(driver.id)
+    if (previousEnd !== undefined && clock - previousEnd < restSeconds) return false
+
+    const length = lengths[index] ?? 0
+    lastSeen.set(driver.id, clock + length)
+    clock += length + a.pitStopSeconds
+  }
+
+  return true
+}
+
 /** Re-check the consecutive cap against real lengths rather than the nominal. */
 export function withinConsecutiveCap(
   a: ScheduleContext,
@@ -75,7 +138,7 @@ export function withinConsecutiveCap(
   lengths: readonly number[],
 ): boolean {
   const cap = a.rules?.driver.max_consecutive_stint_seconds
-  if (cap === undefined) return true
+  if (cap === undefined || cap === null) return true
 
   let run = 0
   for (const [index, driver] of assigned.entries()) {
