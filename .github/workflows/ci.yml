@@ -73,11 +73,22 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # --only-shell: we run headless chromium only, so skip the full browser
+        # download. Timeout because a wedged download otherwise burns the
+        # entire job budget looking indistinguishable from a slow one.
+        timeout-minutes: 6
+        run: npx playwright install --with-deps --only-shell chromium
       - name: Migrate + seed
         run: npm run db:migrate && npm run db:seed
       - name: Playwright
+        timeout-minutes: 10
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
