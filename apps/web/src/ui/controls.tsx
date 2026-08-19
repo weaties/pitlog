@@ -120,9 +120,18 @@ export function Toggle({
   )
 }
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+/**
+ * Spreads the rest of its props onto the element. Without that, anything the
+ * caller attaches — `data-testid`, `role`, `aria-*` — is silently swallowed,
+ * which is both a testing trap and an accessibility one.
+ */
+export function Card({
+  children,
+  className = '',
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { children: ReactNode }) {
   return (
-    <div className={`rounded-xl border border-white/10 bg-pit-surface p-4 ${className}`}>
+    <div {...rest} className={`rounded-xl border border-white/10 bg-pit-surface p-4 ${className}`}>
       {children}
     </div>
   )
