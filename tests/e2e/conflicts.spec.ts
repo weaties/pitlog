@@ -7,6 +7,14 @@ import { expect, test } from '@playwright/test'
  */
 
 const API = 'http://localhost:8787'
+
+/**
+ * Client clocks near *now*, because that is what a real device produces and
+ * because restoring a value stamps it with the current instant. Synthetic
+ * timestamps in the future would make every restore lose on the comparator —
+ * correctly, and confusingly.
+ */
+const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString()
 const SESSION = '00000000-0000-4000-8000-000000000102'
 const KIM = '11111111-1111-4111-8111-111111111111'
 const SAM = '22222222-2222-4222-8222-222222222222'
@@ -41,7 +49,7 @@ async function push(
             id: row.id,
             team_id: teamId,
             session_id: SESSION,
-            filled_at: '2026-10-10T20:00:00.000Z',
+            filled_at: minutesAgo(25),
             gallons: row.gallons,
             filled_to_full: true,
             client_updated_at: row.at,
@@ -61,11 +69,11 @@ test('a value that loses is shown to a human, not discarded', async ({ page }) =
   const rowId = crypto.randomUUID()
 
   // Two devices, one row. Kim first, Sam later and louder.
-  await push(page, teamId, { id: rowId, gallons: 14.2, at: '2026-10-10T20:01:00.000Z', by: KIM })
+  await push(page, teamId, { id: rowId, gallons: 14.2, at: minutesAgo(20), by: KIM })
   const second = await push(page, teamId, {
     id: rowId,
     gallons: 12.4,
-    at: '2026-10-10T20:05:00.000Z',
+    at: minutesAgo(10),
     by: SAM,
   })
 
@@ -83,8 +91,8 @@ test('a human can put the losing value back in one action', async ({ page }) => 
   const teamId = await signIn(page)
   const rowId = crypto.randomUUID()
 
-  await push(page, teamId, { id: rowId, gallons: 9.1, at: '2026-10-10T20:01:00.000Z', by: KIM })
-  await push(page, teamId, { id: rowId, gallons: 3.3, at: '2026-10-10T20:05:00.000Z', by: SAM })
+  await push(page, teamId, { id: rowId, gallons: 9.1, at: minutesAgo(20), by: KIM })
+  await push(page, teamId, { id: rowId, gallons: 3.3, at: minutesAgo(10), by: SAM })
 
   // Find *this* test's conflict rather than whichever is first on screen: the
   // suite shares one database, so the list holds other tests' conflicts too.
@@ -98,17 +106,39 @@ test('a human can put the losing value back in one action', async ({ page }) => 
 
   await page.getByTestId(`restore-${mine?.id}`).click()
 
-  // Restoring is an ordinary write: it queues and syncs like anything else.
-  await page.getByTestId('sync-status').click()
-  await expect(page.getByTestId('sync-status')).toHaveText('Synced', { timeout: 15_000 })
+  // Restoring is an ordinary write: it lands locally first, like every other
+  // write in the app. Asserted on the row rather than on the sync pill, whose
+  // timing depends on how much else is queued.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (id) => {
+          const open = indexedDB.open('pitlog')
+          const db: IDBDatabase = await new Promise((r, j) => {
+            open.onsuccess = () => r(open.result)
+            open.onerror = () => j(open.error)
+          })
+          const req = db.transaction('fuel_fills', 'readonly').objectStore('fuel_fills').get(id)
+          const row: { gallons?: string } | undefined = await new Promise((r, j) => {
+            req.onsuccess = () => r(req.result)
+            req.onerror = () => j(req.error)
+          })
+          // Number, not string: Postgres hands numerics back as '9.10' and
+          // the restored row carries the server's formatting, not the
+          // browser's.
+          return row?.gallons === undefined ? null : Number(row.gallons)
+        }, rowId),
+      { timeout: 15_000 },
+    )
+    .toBe(9.1)
 })
 
 test('dismissing clears the alert but never the history', async ({ page }) => {
   const teamId = await signIn(page)
   const rowId = crypto.randomUUID()
 
-  await push(page, teamId, { id: rowId, gallons: 7.7, at: '2026-10-10T20:01:00.000Z', by: KIM })
-  await push(page, teamId, { id: rowId, gallons: 5.5, at: '2026-10-10T20:05:00.000Z', by: SAM })
+  await push(page, teamId, { id: rowId, gallons: 7.7, at: minutesAgo(20), by: KIM })
+  await push(page, teamId, { id: rowId, gallons: 5.5, at: minutesAgo(10), by: SAM })
 
   const before = await page.request.get(`${API}/api/teams/${teamId}/conflicts`)
   const list = (await before.json()) as { conflicts: { id: string; row_id: string }[] }
@@ -137,8 +167,8 @@ test('an edit somebody makes to their own entry is history, not an alarm', async
 
   // Same author twice: an ordinary correction. Flagging these would train a
   // crew to swipe the conflict list away.
-  await push(page, teamId, { id: rowId, gallons: 11.1, at: '2026-10-10T20:01:00.000Z', by: KIM })
-  await push(page, teamId, { id: rowId, gallons: 11.9, at: '2026-10-10T20:05:00.000Z', by: KIM })
+  await push(page, teamId, { id: rowId, gallons: 11.1, at: minutesAgo(20), by: KIM })
+  await push(page, teamId, { id: rowId, gallons: 11.9, at: minutesAgo(10), by: KIM })
 
   const conflicts = await page.request.get(`${API}/api/teams/${teamId}/conflicts`)
   const list = (await conflicts.json()) as { conflicts: { row_id: string }[] }

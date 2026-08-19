@@ -293,8 +293,17 @@ function ExpenseForm({
   const [description, setDescription] = useState('')
   const [dollars, setDollars] = useState('')
   const [category, setCategory] = useState('other')
-  const [payer, setPayer] = useState(roster[0]?.id ?? '')
-  const [splitWith, setSplitWith] = useState<string[]>(roster.map((d) => d.id))
+  // Same shape of bug as the split below, and worse in its consequence: a
+  // payer captured from an empty roster stays empty, and the expense is
+  // silently recorded as paid by nobody.
+  const [chosenPayer, setChosenPayer] = useState<string | null>(null)
+  const payer = chosenPayer ?? roster[0]?.id ?? ''
+  // Null means "nobody has chosen yet", which resolves to everyone. Capturing
+  // the roster into state at mount looked equivalent and was not: open this
+  // form before the local read finishes and the default was an empty split,
+  // leaving Save disabled with no way to recover.
+  const [chosen, setChosen] = useState<string[] | null>(null)
+  const splitWith = chosen ?? roster.map((d) => d.id)
   const [receipt, setReceipt] = useState<Draft['receipt']>(null)
   const [hashing, setHashing] = useState(false)
 
@@ -357,7 +366,7 @@ function ExpenseForm({
           <Select
             id={id}
             value={payer}
-            onChange={(e) => setPayer(e.target.value)}
+            onChange={(e) => setChosenPayer(e.target.value)}
             data-testid="expense-payer"
           >
             {roster.map((d) => (
@@ -377,9 +386,7 @@ function ExpenseForm({
             label={driver.first_name}
             checked={splitWith.includes(driver.id)}
             onChange={(on) =>
-              setSplitWith(
-                on ? [...splitWith, driver.id] : splitWith.filter((id) => id !== driver.id),
-              )
+              setChosen(on ? [...splitWith, driver.id] : splitWith.filter((id) => id !== driver.id))
             }
           />
         ))}
