@@ -288,3 +288,115 @@ describe('the pull cursor', () => {
     expect(PULL_OVERLAP_SECONDS).toBeGreaterThanOrEqual(30)
   })
 })
+
+describe('applySyncPush — keeping what was overwritten', () => {
+  function storeWithHistory(seed: SyncRow[]) {
+    const base = memoryStore({ fuel_fills: seed })
+    const recorded: { table: string; previous: SyncRow; wasConflict: boolean }[] = []
+    return {
+      store: {
+        ...base.store,
+        async recordSuperseded(
+          rows: readonly {
+            table: SyncTableName
+            previous: SyncRow
+            supersededBy: string | null
+            wasConflict: boolean
+          }[],
+        ) {
+          recorded.push(...rows)
+        },
+      },
+      recorded,
+    }
+  }
+
+  it('keeps the previous value when a write supersedes it', async () => {
+    const held = parseSyncRow('fuel_fills', fill(FILL_A, { gallons: 12.4 }))
+    if (!held.ok) throw new Error('fixture')
+    const { store, recorded } = storeWithHistory([held.row])
+
+    await applySyncPush(
+      store,
+      push([
+        {
+          table: 'fuel_fills',
+          row: fill(FILL_A, { client_updated_at: '2026-10-10T16:00:00.000Z' }),
+        },
+      ]),
+      { teamId: TEAM, now: NOW },
+    )
+
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]?.previous.gallons).toBe('12.4')
+  })
+
+  it('keeps an edit somebody made to their own row, without calling it a conflict', async () => {
+    // Not worth interrupting anyone about, but it is still the history someone
+    // wants on Sunday night.
+    const held = parseSyncRow('fuel_fills', fill(FILL_A, { gallons: 12.4 }))
+    if (!held.ok) throw new Error('fixture')
+    const { store, recorded } = storeWithHistory([held.row])
+
+    await applySyncPush(
+      store,
+      push([
+        {
+          table: 'fuel_fills',
+          row: fill(FILL_A, { client_updated_at: '2026-10-10T16:00:00.000Z' }),
+        },
+      ]),
+      { teamId: TEAM, now: NOW },
+    )
+
+    expect(recorded[0]?.wasConflict).toBe(false)
+  })
+
+  it('marks an overwrite by a different person as a conflict', async () => {
+    const held = parseSyncRow('fuel_fills', fill(FILL_A, { gallons: 12.4, updated_by: SAM }))
+    if (!held.ok) throw new Error('fixture')
+    const { store, recorded } = storeWithHistory([held.row])
+
+    await applySyncPush(
+      store,
+      push([
+        {
+          table: 'fuel_fills',
+          row: fill(FILL_A, { client_updated_at: '2026-10-10T16:00:00.000Z', updated_by: KIM }),
+        },
+      ]),
+      { teamId: TEAM, now: NOW },
+    )
+
+    expect(recorded[0]?.wasConflict).toBe(true)
+    expect(recorded[0]?.previous.updated_by).toBe(SAM)
+  })
+
+  it('keeps nothing when a write is a replay', async () => {
+    const held = parseSyncRow('fuel_fills', fill(FILL_A))
+    if (!held.ok) throw new Error('fixture')
+    const { store, recorded } = storeWithHistory([held.row])
+
+    await applySyncPush(store, push([{ table: 'fuel_fills', row: fill(FILL_A) }]), {
+      teamId: TEAM,
+      now: NOW,
+    })
+
+    expect(recorded).toHaveLength(0)
+  })
+
+  it('works against a store that keeps no history at all', async () => {
+    // The method is optional so the client-side store, which has no history to
+    // keep, does not have to pretend.
+    const { store } = memoryStore()
+    const response = await applySyncPush(
+      store,
+      push([{ table: 'fuel_fills', row: fill(FILL_A) }]),
+      {
+        teamId: TEAM,
+        now: NOW,
+      },
+    )
+    expect(response.results[0]?.outcome).toBe('insert')
+  })
+})

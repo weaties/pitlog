@@ -18,11 +18,32 @@ import type { SyncPushRequest, SyncPushResponse, SyncWriteResult } from './proto
 import { parseSyncRow } from './protocol.js'
 import type { SyncTableName } from './tables.js'
 
+export interface SupersededRow {
+  table: SyncTableName
+  /** The row exactly as it was before being overwritten. */
+  previous: SyncRow
+  /** Who overwrote it. */
+  supersededBy: string | null
+  /**
+   * True when a human should be shown this. One person correcting themselves
+   * is history; being overwritten by somebody *else* is a conflict.
+   */
+  wasConflict: boolean
+}
+
 export interface SyncStore {
   /** Rows this team already holds for these ids. Missing ids are simply absent. */
   load(table: SyncTableName, ids: readonly string[]): Promise<Map<string, SyncRow>>
   /** Persist the winners. Called once per table with everything that changed. */
   save(table: SyncTableName, rows: readonly SyncRow[]): Promise<void>
+  /**
+   * Keep what was overwritten.
+   *
+   * Append-only, and the reason last-write-wins is survivable: without it the
+   * losing value is gone and the person who typed it can never find out what
+   * happened to it (SPEC §5.2, §6.2).
+   */
+  recordSuperseded?(rows: readonly SupersededRow[]): Promise<void>
 }
 
 export interface ApplyOptions {
@@ -77,6 +98,8 @@ export async function applySyncPush(
     accepted.set(parsed.table, bucket)
   }
 
+  const superseded: SupersededRow[] = []
+
   for (const [table, entries] of accepted) {
     const held = await store.load(
       table,
@@ -95,6 +118,18 @@ export async function applySyncPush(
         winners.push(decision.winner)
       }
 
+      // Every value that lost is kept, whether or not it is worth interrupting
+      // anybody about. An edit nobody flags today is still the history somebody
+      // wants on Sunday night.
+      if (decision.loser) {
+        superseded.push({
+          table,
+          previous: decision.loser,
+          supersededBy: decision.winner.updated_by,
+          wasConflict: decision.conflict,
+        })
+      }
+
       results[index] = {
         table,
         id: row.id,
@@ -105,6 +140,8 @@ export async function applySyncPush(
 
     if (winners.length > 0) await store.save(table, winners)
   }
+
+  if (superseded.length > 0) await store.recordSuperseded?.(superseded)
 
   return {
     protocolVersion: request.protocolVersion,
