@@ -46,21 +46,30 @@ integration.
 
 ### Planner — the hard part (SPEC §5.1)
 
-- [ ] **Burn-rate model.** Rolling estimate from (fill volume ÷ elapsed since
+The solver, the models behind it, and live replanning are done and live in
+`packages/domain`, database-free and browser-free. What is left here is the UI
+(#7, #10), which waits on the offline read path.
+
+**Nothing below changes the standing warning:** every shipped rule config is
+still UNVERIFIED, so the numbers a plan produces are structurally correct and
+factually unconfirmed. The solver reports which fields are guesses; #7 is what
+puts that on screen.
+
+- [x] **Burn-rate model.** Rolling estimate from (fill volume ÷ elapsed since
       last full tank). Only `filled_to_full` fills are datapoints. Returns an
       estimate *with* a confidence and the inputs it used — never a bare number. — #3
-- [ ] **Per-driver burn adjustment.** Applies `drivers.burn_rate_factor` once
+- [x] **Per-driver burn adjustment.** Applies `drivers.burn_rate_factor` once
       there is enough data to justify one; states when there is not. — #4
-- [ ] **Stint solver v1.** Inputs: race length, fuel capacity, burn rate, driver
+- [x] **Stint solver v1.** Inputs: race length, fuel capacity, burn rate, driver
       roster with min/max seat time, rule config, pit overhead, fairness weight.
       Output: who, when in/out, expected fuel state, fill volume per stop.
       Must reproduce `KNOWN_GOOD_SOLUTION` exactly on the fixture race. — #5
-- [ ] **Rule-config enforcement in the solver.** Consumes `pit`, `fueling`, and
+- [x] **Rule-config enforcement in the solver.** Consumes `pit`, `fueling`, and
       `driver` constraints as data. No `switch` on `series_key`. — #6
 - [ ] **UNVERIFIED banner.** Any plan built on a config with unverified fields
       says so on screen, listing which inputs are guesses (SPEC §5.1). — #7
-- [ ] **Live replanning.** Re-solve from "now" against logged actuals. — #8
-- [ ] **"Pit now?" what-if.** Re-solve with an immediate stop, show the delta
+- [x] **Live replanning.** Re-solve from "now" against logged actuals. — #8
+- [x] **"Pit now?" what-if.** Re-solve with an immediate stop, show the delta
       against the current plan. — #9
 - [ ] **Planner UI.** Schedule view, per-stop fill volumes, assumptions panel. — #10
 
