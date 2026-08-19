@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/*
+ * Pit-mode design tokens — SPEC §6.2: "gloves-and-sunlight". Big targets,
+ * high contrast, auto dark/light. The real design pass is its own milestone;
+ * these are the load-bearing minimums so nothing shipped now has to be undone.
+ */
+@theme {
+  --color-pit-bg: oklch(0.18 0.02 250);
+  --color-pit-surface: oklch(0.24 0.02 250);
+  --color-pit-fg: oklch(0.97 0.01 250);
+  --color-pit-muted: oklch(0.72 0.02 250);
+  --color-pit-accent: oklch(0.72 0.17 55);
+
+  /* Minimum tap target for a gloved hand. Never go below this. */
+  --spacing-tap: 4rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark light;
+  }
+  body {
+    @apply bg-pit-bg text-pit-fg antialiased;
+    /* Avoid double-tap zoom stealing taps in the pits. */
+    touch-action: manipulation;
+  }
+}

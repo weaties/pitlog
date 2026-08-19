@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": ".tsc/tools",
+    "types": ["node"],
+    "composite": true
+  },
+  "include": ["playwright.config.ts", "vitest.config.ts", "tests/**/*.ts"]
+}
