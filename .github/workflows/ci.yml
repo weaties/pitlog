@@ -80,11 +80,13 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright browsers
-        # --only-shell: we run headless chromium only, so skip the full browser
-        # download. Timeout because a wedged download otherwise burns the
-        # entire job budget looking indistinguishable from a slow one.
-        timeout-minutes: 6
-        run: npx playwright install --with-deps --only-shell chromium
+        # No --with-deps: it shells out to apt-get, which stalls on the runner's
+        # mirrorlist often enough to wedge the job, and the ubuntu-latest image
+        # already ships the libraries headless chromium needs. If one ever goes
+        # missing, the Playwright step below names it directly.
+        # --only-shell: the suite runs headless chromium only.
+        timeout-minutes: 5
+        run: npx playwright install --only-shell chromium
       - name: Migrate + seed
         run: npm run db:migrate && npm run db:seed
       - name: Playwright
