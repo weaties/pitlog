@@ -1,0 +1,354 @@
+/**
+ * The stint & fuel planner — SPEC §5.1, and the only hard part of M1 (§9).
+ *
+ * Framework-free: no HTTP, no database, no React. The API hands it numbers and
+ * a rule config; it hands back a schedule and the reasons to doubt it.
+ *
+ * **The objective is lexicographic, not a weighted score** (AGENTS.md →
+ * Decisions). Plans are compared on one term at a time, moving to the next only
+ * on an exact tie:
+ *
+ *   1. feasibility  2. fewest stops  3. smallest seat-time spread
+ *   4. smallest stint-length variance  5. roster order
+ *
+ * That is why the search below is a scan upward from the smallest stint count
+ * rather than an optimiser: term 2 dominates everything after it, so the first
+ * feasible stint count *is* the answer, and terms 3-5 only choose between plans
+ * of that size. A weighted sum would land somewhere near this by accident of
+ * the weights, and "reproduces the known-good solution exactly" would stop
+ * being a testable claim.
+ *
+ * **Rule configs are data** (SPEC §5.1, #6). Nothing here branches on
+ * `series_key`; a series differs from another only in the numbers it supplies.
+ * `CONSUMED_RULE_FIELDS` and `UNMODELLED_RULE_FIELDS` between them must cover
+ * every field in the schema, so a field added later cannot be silently ignored
+ * — a test enforces that.
+ *
+ * Every shipped rule config is UNVERIFIED (SPEC §3), so a plan carries the
+ * config's verification state with it. #7 renders it. Never show a schedule
+ * from this module as though it were authoritative.
+ */
+
+import type { BurnRateEstimate } from './burn-rate.js'
+import type { SeriesRulesConfig } from './series-rules.js'
+import type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
+import { buildAssumptions, describeRules } from './stint-rules.js'
+import {
+  assignDrivers,
+  distributeSeconds,
+  stintBounds,
+  withinConsecutiveCap,
+} from './stint-schedule.js'
+
+export type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
+export { CONSUMED_RULE_FIELDS, UNMODELLED_RULE_FIELDS } from './stint-rules.js'
+
+/** A runaway guard. A 24-hour race on 30-minute stints is 48. */
+const MAX_STINTS = 200
+
+const HOUR_SECONDS = 3600
+
+export interface PlannerDriver {
+  id: string
+  /** False for crew who share costs but never take a seat. */
+  canDrive: boolean
+  minStintSeconds: number | null
+  maxStintSeconds: number | null
+  /** Multiplier on the team burn rate — see `estimateDriverBurnRates`. */
+  burnRateFactor: number
+}
+
+export interface StintPlanInput {
+  raceSeconds: number
+  fuelCapacityGallons: number
+  /** Fuel the plan refuses to dip below. */
+  reserveGallons: number
+  /** Modelled stationary time per stop, including the driver change. */
+  pitStopSeconds: number
+  /** An estimate, never a bare number — SPEC §5.1. */
+  burnRate: BurnRateEstimate
+  drivers: readonly PlannerDriver[]
+  rules: SeriesRulesConfig | null
+  /**
+   * How hard to insist on an even split, 0..1.
+   *
+   * SPEC §5.1 names "fairness weight" as an input without defining it. The v1
+   * reading is a tolerance: the seat-time spread may not exceed
+   * `(1 - fairnessWeight)` of the average seat time. At 1 the split must be
+   * exact, at 0 anything goes. It cannot trade against stop count, which
+   * outranks it in the objective chain.
+   */
+  fairnessWeight?: number
+  /** Defaults to a full tank. Set by live replanning. */
+  startFuelGallons?: number
+}
+
+export interface PlannedStint {
+  sequence: number
+  driverId: string
+  startOffsetSeconds: number
+  endOffsetSeconds: number
+  fuelAtStartGallons: number
+  fuelAtEndGallons: number
+  /** The rate used for this stint: team rate × this driver's factor. */
+  burnGph: number
+}
+
+export interface PlannedFill {
+  /** The fill happens in the stop after this stint ends. */
+  afterStintSequence: number
+  gallons: number
+}
+
+export interface StintPlan {
+  stints: PlannedStint[]
+  fills: PlannedFill[]
+  stopCount: number
+  seatTimeSecondsByDriver: Record<string, number>
+  seatTimeSpreadSeconds: number
+  /** After applying any series minimum. */
+  pitStopSeconds: number
+  /** After applying any series cap. */
+  fuelCapacityGallons: number
+  burnRate: BurnRateEstimate
+  ruleConfig: PlanRuleConfig | null
+  /** Never empty. SPEC §5.1 forbids a bare schedule. */
+  assumptions: PlanAssumption[]
+}
+
+export type StintPlanFailureReason =
+  | 'no_eligible_drivers'
+  | 'no_usable_fuel'
+  | 'insufficient_drivers_for_rules'
+  | 'share_cap_unsatisfiable'
+  | 'stint_bounds_unsatisfiable'
+
+export type StintPlanResult =
+  | { ok: true; plan: StintPlan }
+  | { ok: false; reason: StintPlanFailureReason; detail: string }
+
+/**
+ * Solve a stint schedule for a whole race.
+ *
+ * Returns a diagnosable refusal rather than a degraded plan: a schedule that
+ * quietly breaks a driver minimum or runs the tank dry is worse than no
+ * schedule, because it looks like an answer.
+ */
+export function solveStintPlan(input: StintPlanInput): StintPlanResult {
+  validate(input)
+
+  const rules = input.rules
+  const fairnessWeight = input.fairnessWeight ?? 0.5
+
+  const pitStopSeconds = Math.max(input.pitStopSeconds, rules?.pit.min_stop_seconds ?? 0)
+  const fuelCapacityGallons = Math.min(
+    input.fuelCapacityGallons,
+    rules?.fueling.max_fuel_capacity_gallons ?? Number.POSITIVE_INFINITY,
+  )
+  const startFuelGallons = Math.min(
+    input.startFuelGallons ?? fuelCapacityGallons,
+    fuelCapacityGallons,
+  )
+
+  const eligible = input.drivers.filter((d) => d.canDrive)
+  if (eligible.length === 0) {
+    return fail('no_eligible_drivers', 'No driver on the roster is marked as able to drive.')
+  }
+
+  if (fuelCapacityGallons - input.reserveGallons <= 0) {
+    return fail(
+      'no_usable_fuel',
+      `The reserve of ${input.reserveGallons} gal leaves nothing usable in a ${fuelCapacityGallons} gal tank.`,
+    )
+  }
+
+  if (rules && eligible.length < rules.driver.min_drivers_per_event) {
+    return fail(
+      'insufficient_drivers_for_rules',
+      `The series requires ${rules.driver.min_drivers_per_event} drivers; ${eligible.length} on the roster can drive.`,
+    )
+  }
+
+  const shareCap = rules?.driver.max_share_of_race ?? 1
+  if (shareCap * eligible.length < 1) {
+    return fail(
+      'share_cap_unsatisfiable',
+      `${eligible.length} drivers capped at ${shareCap} of the race each cannot cover it. More drivers are needed.`,
+    )
+  }
+
+  for (let stintCount = 1; stintCount <= MAX_STINTS; stintCount++) {
+    const driveSeconds = input.raceSeconds - pitStopSeconds * (stintCount - 1)
+    if (driveSeconds <= 0) break
+
+    const attempt = tryStintCount({
+      stintCount,
+      driveSeconds,
+      eligible,
+      rules,
+      shareCap,
+      fairnessWeight,
+      pitStopSeconds,
+      fuelCapacityGallons,
+      startFuelGallons,
+      raceSeconds: input.raceSeconds,
+      reserveGallons: input.reserveGallons,
+      burnRateGph: input.burnRate.gph,
+    })
+
+    if (attempt) {
+      return {
+        ok: true,
+        plan: {
+          ...attempt,
+          pitStopSeconds,
+          fuelCapacityGallons,
+          burnRate: input.burnRate,
+          ruleConfig: describeRules(rules),
+          assumptions: buildAssumptions(input.burnRate, rules),
+        },
+      }
+    }
+  }
+
+  return fail(
+    'stint_bounds_unsatisfiable',
+    'No stint count satisfies the driver minimums and maximums, the consecutive-driving cap, and the fuel window at once.',
+  )
+}
+
+/**
+ * Everything one candidate schedule needs, after the series rules have been
+ * folded into plain numbers. Shared with `stint-schedule.ts`.
+ */
+export interface ScheduleContext {
+  stintCount: number
+  driveSeconds: number
+  eligible: readonly PlannerDriver[]
+  rules: SeriesRulesConfig | null
+  shareCap: number
+  fairnessWeight: number
+  pitStopSeconds: number
+  fuelCapacityGallons: number
+  startFuelGallons: number
+  raceSeconds: number
+  reserveGallons: number
+  burnRateGph: number
+}
+
+type Attempt = Pick<
+  StintPlan,
+  'stints' | 'fills' | 'stopCount' | 'seatTimeSecondsByDriver' | 'seatTimeSpreadSeconds'
+>
+
+/** Build the best plan for exactly this many stints, or null if there isn't one. */
+function tryStintCount(a: ScheduleContext): Attempt | null {
+  const nominal = a.driveSeconds / a.stintCount
+  const assigned = assignDrivers(a, nominal)
+  if (!assigned) return null
+
+  const bounds = assigned.map((driver, index) => stintBounds(a, driver, index === 0))
+  if (bounds.some((b) => b.min > b.max)) return null
+
+  const lengths = distributeSeconds(a.driveSeconds, bounds)
+  if (!lengths) return null
+
+  const seatTime: Record<string, number> = {}
+  for (const [index, driver] of assigned.entries()) {
+    seatTime[driver.id] = (seatTime[driver.id] ?? 0) + (lengths[index] ?? 0)
+  }
+
+  // The share cap and the fairness tolerance are re-checked against the actual
+  // lengths: assignment only ever saw the nominal equal split.
+  for (const seconds of Object.values(seatTime)) {
+    if (seconds / a.raceSeconds > a.shareCap) return null
+  }
+
+  const seatValues = Object.values(seatTime)
+  const spread = Math.max(...seatValues) - Math.min(...seatValues)
+  const averageSeat = a.driveSeconds / seatValues.length
+  if (spread > (1 - a.fairnessWeight) * averageSeat) return null
+
+  if (!withinConsecutiveCap(a, assigned, lengths)) return null
+
+  const stints: PlannedStint[] = []
+  const fills: PlannedFill[] = []
+  let offset = 0
+  let fuel = a.startFuelGallons
+
+  for (const [index, driver] of assigned.entries()) {
+    const length = lengths[index] ?? 0
+    const burnGph = a.burnRateGph * driver.burnRateFactor
+    const fuelAtEnd = fuel - (length / HOUR_SECONDS) * burnGph
+
+    stints.push({
+      sequence: index + 1,
+      driverId: driver.id,
+      startOffsetSeconds: offset,
+      endOffsetSeconds: offset + length,
+      fuelAtStartGallons: round(fuel),
+      fuelAtEndGallons: round(fuelAtEnd),
+      burnGph,
+    })
+
+    const isLast = index === assigned.length - 1
+    if (!isLast) {
+      // Brim every stop. It is the only fill that yields a burn-rate datapoint,
+      // and carrying less fuel than the tank holds buys nothing here.
+      fills.push({
+        afterStintSequence: index + 1,
+        gallons: round(a.fuelCapacityGallons - fuelAtEnd),
+      })
+      fuel = a.fuelCapacityGallons
+      offset += length + a.pitStopSeconds
+    }
+  }
+
+  return {
+    stints,
+    fills,
+    stopCount: a.stintCount - 1,
+    seatTimeSecondsByDriver: seatTime,
+    seatTimeSpreadSeconds: spread,
+  }
+}
+
+function fail(reason: StintPlanFailureReason, detail: string): StintPlanResult {
+  return { ok: false, reason, detail }
+}
+
+/** Trim binary-float dust so a plan compares equal to the one beside it. */
+function round(n: number): number {
+  return Math.round(n * 1e6) / 1e6
+}
+
+function validate(input: StintPlanInput): void {
+  if (!(input.raceSeconds > 0)) {
+    throw new Error(`race length must be positive, got ${input.raceSeconds}`)
+  }
+  if (!(input.fuelCapacityGallons > 0)) {
+    throw new Error(`fuel capacity must be positive, got ${input.fuelCapacityGallons}`)
+  }
+  if (input.reserveGallons < 0 || input.reserveGallons > input.fuelCapacityGallons) {
+    throw new Error(
+      `reserve of ${input.reserveGallons} gal must be between 0 and the tank size of ${input.fuelCapacityGallons} gal`,
+    )
+  }
+  if (!(input.pitStopSeconds >= 0)) {
+    throw new Error(`pit stop must not be negative, got ${input.pitStopSeconds}`)
+  }
+  if (!(input.burnRate.gph > 0)) {
+    throw new Error(`burn rate must be positive, got ${input.burnRate.gph}`)
+  }
+  const weight = input.fairnessWeight ?? 0.5
+  if (weight < 0 || weight > 1) {
+    throw new Error(`fairness weight must be between 0 and 1, got ${weight}`)
+  }
+  for (const driver of input.drivers) {
+    if (!(driver.burnRateFactor > 0)) {
+      throw new Error(
+        `burn rate factor for ${driver.id} must be positive, got ${driver.burnRateFactor}`,
+      )
+    }
+  }
+}

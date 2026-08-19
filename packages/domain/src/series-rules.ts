@@ -100,7 +100,7 @@ export const seriesRulesConfigSchema = z
 export type SeriesRulesConfig = z.infer<typeof seriesRulesConfigSchema>
 
 /** Dotted paths of every rule value a planner run actually consumes. */
-const RULE_FIELD_PATHS: readonly string[] = [
+export const RULE_FIELD_PATHS: readonly string[] = [
   ...Object.keys(pitSchema.shape).map((k) => `pit.${k}`),
   ...Object.keys(fuelingSchema.shape).map((k) => `fueling.${k}`),
   ...Object.keys(driverFields).map((k) => `driver.${k}`),
