@@ -31,6 +31,7 @@
 
 import type { BurnRateEstimate } from './burn-rate.js'
 import type { SeriesRulesConfig } from './series-rules.js'
+import { minDriversForRace } from './series-rules.js'
 import type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
 import {
   buildAssumptions,
@@ -43,6 +44,7 @@ import {
   distributeSeconds,
   stintBounds,
   withinConsecutiveCap,
+  withinRestRequirement,
 } from './stint-schedule.js'
 
 export type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
@@ -197,10 +199,13 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
     )
   }
 
-  if (rules && eligible.length < rules.driver.min_drivers_per_event) {
+  // The requirement is a function of race length in all three shipped series,
+  // so it is read against this race rather than taken as a constant.
+  const requiredDrivers = rules ? minDriversForRace(rules, input.raceSeconds) : 1
+  if (eligible.length < requiredDrivers) {
     return fail(
       'insufficient_drivers_for_rules',
-      `The series requires ${rules.driver.min_drivers_per_event} drivers; ${eligible.length} on the roster can drive.`,
+      `A ${(input.raceSeconds / 3600).toFixed(1)} h race in this series requires ${requiredDrivers} drivers; ${eligible.length} on the roster can drive.`,
     )
   }
 
@@ -352,6 +357,7 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
   if (spread > (1 - a.fairnessWeight) * averageSeat) return null
 
   if (!withinConsecutiveCap(a, assigned, lengths)) return null
+  if (!withinRestRequirement(a, assigned, lengths)) return null
 
   const stints: PlannedStint[] = []
   const fills: PlannedFill[] = []

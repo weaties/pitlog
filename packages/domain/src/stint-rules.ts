@@ -23,6 +23,7 @@ export const CONSUMED_RULE_FIELDS: readonly string[] = [
   'driver.min_stint_seconds',
   'driver.max_stint_seconds',
   'driver.max_consecutive_stint_seconds',
+  'driver.min_rest_seconds',
   'driver.min_drivers_per_event',
   'driver.max_share_of_race',
 ]

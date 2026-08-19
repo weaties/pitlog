@@ -1,44 +1,99 @@
 # Lucky Dog Racing League — series rule config
 #
-# !!! UNVERIFIED !!!
-# SPEC §3 lists "per-series rule details to encode" as an OPEN ITEM owned by Dan.
-# Every number below is a structurally-valid PLACEHOLDER, not a real rule. They
-# exist so the schema, the migrations, and the planner's input plumbing can be
-# built and tested before the rulebooks are read. Do NOT plan a real race from
-# this file, and do NOT "improve" these numbers by guessing.
-#
-# To verify: read the current Lucky Dog Racing League rulebook, replace the values, add the
-# citation under `verification.source`, list the checked paths in
-# `verified_fields`, move `status` to PARTIAL/VERIFIED, and bump
-# `config_version`. See .claude/skills/series-rules/SKILL.md.
+# VERIFICATION: PARTIAL, checked against the 2026 Lucky Dog Racing League
+# Competition Rules, v1.0, downloaded from
+# https://www.racelucky.com/wp-content/uploads/2025/10/Lucky-Dog-Rules-v1.1.pdf
+# and read 2026-08-19.
 
 schema_version: 1
 series_key: luckydog
 display_name: Lucky Dog Racing League
-config_version: 1
+config_version: 2
+
+notes: >-
+  Two rules here bind harder than they look. The mandatory five-minute fuelling
+  stop can be overridden by an event's Supplemental Rules, so confirm it against
+  the event pack rather than assuming this number. And the required 60-minute
+  break between stints is the constraint most likely to bite a two-driver entry:
+  with 2 h maximum stints, two drivers alternating is legal only because each
+  one's rest is exactly the other's stint.
 
 verification:
-  status: UNVERIFIED
-  source: null
-  checked_at: null
-  verified_fields: []
+  status: PARTIAL
+  source: >-
+    2026 Lucky Dog Racing League Competition Rules v1.0 (©2015-2026), sections 3
+    (Teams / Number of Drivers), 6 (Interior Car Safety, kill switch and fuel
+    capacity) and 9 (Fueling), plus the Driver Stints and Pit Stops rules.
+    https://www.racelucky.com/wp-content/uploads/2025/10/Lucky-Dog-Rules-v1.1.pdf
+    Read 2026-08-19.
+  checked_at: '2026-08-19'
+  verified_fields:
+    - pit.min_stop_seconds
+    - pit.engine_off_for_fueling
+    - pit.driver_in_car_during_fueling
+    - pit.driver_change_during_fueling
+    - pit.max_crew_over_wall
+    - fueling.max_fuel_capacity_gallons
+    - fueling.refuel_allowed_under_yellow
+    - fueling.fuel_can_only
+    - fueling.max_can_size_gallons
+    - driver.min_stint_seconds
+    - driver.max_stint_seconds
+    - driver.max_consecutive_stint_seconds
+    - driver.min_rest_seconds
+    - driver.max_share_of_race
 
 pit:
-  min_stop_seconds: 300              # PLACEHOLDER
-  engine_off_for_fueling: true       # PLACEHOLDER
-  driver_in_car_during_fueling: false # PLACEHOLDER
-  driver_change_during_fueling: false # PLACEHOLDER
-  max_crew_over_wall: null           # unknown
+  # §9: "all fueling pit stops are a mandatory five (5) minutes (unless
+  # otherwise noted in an event's Supplemental Rules)"
+  min_stop_seconds: 300
+  # §6: the kill switch "must be turned off during any fueling activity"
+  engine_off_for_fueling: true
+  # §9: "No persons are allowed in the car during fueling."
+  driver_in_car_during_fueling: false
+  # §9 counts both drivers among the five over the wall while the cap is off,
+  # but nobody may be in the car during fuelling — so the change cannot
+  # complete until fuelling stops. Modelled as sequential, which is the
+  # conservative reading.
+  driver_change_during_fueling: false
+  # §9: "NO MORE THAN FIVE (5) PEOPLE OVER THE WALL WHILE THE FUEL CAP IS OFF.
+  # THE OUTGOING AND INCOMING DRIVERS COUNT TOWARDS THAT FIVE (5)."
+  max_crew_over_wall: 5
 
 fueling:
-  max_fuel_capacity_gallons: null    # unknown
-  refuel_allowed_under_yellow: true  # PLACEHOLDER
-  fuel_can_only: true                # PLACEHOLDER
-  max_can_size_gallons: null         # unknown
+  # §6: "FUEL CELL + AUXILIARY TANKS + SURGE TANK = TOTAL ONBOARD FUEL
+  # CAPACITY. FUEL CAPACITY IS LIMITED TO 24 GALLONS."
+  max_fuel_capacity_gallons: 24
+  # "Pit Stops/Driver Changes & Fueling are allowed at any time, except during
+  # Red Flag or All Black Flag incidents (all work and fueling on pit lane must
+  # come to an immediate stop until the race returns to Yellow)."
+  refuel_allowed_under_yellow: true
+  # §9: "No fueling from a motorized pump or at the track's on-premises fueling
+  # station." Mechanical pumps and dry breaks are allowed.
+  fuel_can_only: true
+  # §9: "authentic, non-leaking five (5) gallon racing fuel jugs"
+  max_can_size_gallons: 5
 
 driver:
-  min_stint_seconds: 1800            # PLACEHOLDER (30 min)
-  max_stint_seconds: 7200            # PLACEHOLDER (2 h)
-  max_consecutive_stint_seconds: 7200 # PLACEHOLDER (2 h)
-  min_drivers_per_event: 2           # PLACEHOLDER
-  max_share_of_race: 0.6             # PLACEHOLDER
+  # "You are certainly welcome to drive shorter stints" — no minimum.
+  min_stint_seconds: null
+  # "Driver Stints are a maximum of two (2) hours... And that does not mean
+  # 2 hours 3 minutes!"
+  max_stint_seconds: 7200
+  max_consecutive_stint_seconds: 7200
+  # "All drivers must have a 60-minute break between driving stints"
+  min_rest_seconds: 3600
+  # §3: "A Lucky Dog team is defined as two or more drivers for a specific
+  # event... Race Duration 12 hours or less – Two (2) drivers required...
+  # Race Duration of 24 hours – Three (3) drivers required".
+  #
+  # NOT in verified_fields on purpose: the rules say the requirement "is always
+  # specified in each race's Event Information & Schedule", so these tiers are
+  # the rulebook's own examples and the event pack is authoritative.
+  min_drivers_per_event:
+    - min_race_hours: 0
+      drivers: 2
+    - min_race_hours: 24
+      drivers: 3
+  # No cap on one driver's share of the race appears in the rules.
+  max_share_of_race: null

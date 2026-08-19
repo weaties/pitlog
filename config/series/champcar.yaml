@@ -1,44 +1,100 @@
 # ChampCar Endurance Series — series rule config
 #
-# !!! UNVERIFIED !!!
-# SPEC §3 lists "per-series rule details to encode" as an OPEN ITEM owned by Dan.
-# Every number below is a structurally-valid PLACEHOLDER, not a real rule. They
-# exist so the schema, the migrations, and the planner's input plumbing can be
-# built and tested before the rulebooks are read. Do NOT plan a real race from
-# this file, and do NOT "improve" these numbers by guessing.
-#
-# To verify: read the current ChampCar Endurance Series rulebook, replace the values, add the
-# citation under `verification.source`, list the checked paths in
-# `verified_fields`, move `status` to PARTIAL/VERIFIED, and bump
-# `config_version`. See .claude/skills/series-rules/SKILL.md.
+# VERIFICATION: PARTIAL, checked against the 2026 BASIC CLUB & COMPETITION
+# RULES (BCCR) v1.4, updated 12/17/2025, downloaded from
+# https://champcar.org/web/pdf/2026_BCCR/2026_BCCR_V1_4.pdf and read 2026-08-19.
 
 schema_version: 1
 series_key: champcar
 display_name: ChampCar Endurance Series
-config_version: 1
+config_version: 2
+
+notes: >-
+  ChampCar is the odd one of the three: a driver change MAY overlap fuelling
+  (8.2.8.1), and the driver may be in the car while it happens (8.2.8.2), so a
+  ChampCar stop parallelises where a Lemons or Lucky Dog stop does not.
+  Two cautions. The five-minute minimum is measured pit-in to pit-out (8.2.4),
+  not stationary time, so treating it as stop overhead is conservative by
+  however long the pit lane takes. And it applies only to stops where fuel is
+  added — "Pit stops where fuel is not added to the car shall not be considered
+  a timed pit stop." Fuel capacity has no series-wide constant: 9.10.2 caps a
+  car at its OEM capacity plus two gallons, and 9.10.2.1 lets cars under 13
+  gallons OEM upgrade to 15, so the limit belongs on the car, not here.
 
 verification:
-  status: UNVERIFIED
-  source: null
-  checked_at: null
-  verified_fields: []
+  status: PARTIAL
+  source: >-
+    ChampCar Endurance Series 2026 Basic Club & Competition Rules (BCCR) v1.4,
+    updated 12/17/2025 — sections 6.4, 7.1, 8.2 and 9.10.
+    https://champcar.org/web/pdf/2026_BCCR/2026_BCCR_V1_4.pdf Read 2026-08-19.
+  checked_at: '2026-08-19'
+  verified_fields:
+    - pit.min_stop_seconds
+    - pit.engine_off_for_fueling
+    - pit.driver_in_car_during_fueling
+    - pit.driver_change_during_fueling
+    - pit.max_crew_over_wall
+    - fueling.max_fuel_capacity_gallons
+    - fueling.fuel_can_only
+    - fueling.max_can_size_gallons
+    - driver.min_stint_seconds
+    - driver.max_stint_seconds
+    - driver.max_consecutive_stint_seconds
+    - driver.min_rest_seconds
+    - driver.min_drivers_per_event
+    - driver.max_share_of_race
 
 pit:
-  min_stop_seconds: 300              # PLACEHOLDER
-  engine_off_for_fueling: true       # PLACEHOLDER
-  driver_in_car_during_fueling: false # PLACEHOLDER
-  driver_change_during_fueling: false # PLACEHOLDER
-  max_crew_over_wall: null           # unknown
+  # 8.2.4: "Each pit stop for fuel shall be a timed pit stop. The minimum time
+  # required per stop is five (5) minutes (pit in to pit out)."
+  min_stop_seconds: 300
+  # 8.2.7: "During the fueling process all cars MUST have their electrical kill
+  # switch in the OFF position."
+  engine_off_for_fueling: true
+  # 8.2.8.2: "The driver entering the race car may ONLY be assisted with belts,
+  # radio connections, cool suit connections, and the window net during the
+  # fueling process" — so the driver is in the car while fuel goes in.
+  driver_in_car_during_fueling: true
+  # 8.2.8.1: "The driver exiting the race car MAY assist the driver entering the
+  # car"; 8.2.8.5 allows the fuelling assistant to "assist with the driver
+  # change".
+  driver_change_during_fueling: true
+  # 8.2.8: "A MAXIMUM OF FIVE (5) PEOPLE ARE ALLOWED OVER THE WALL DURING
+  # FUELING."
+  max_crew_over_wall: 5
 
 fueling:
-  max_fuel_capacity_gallons: null    # unknown
-  refuel_allowed_under_yellow: true  # PLACEHOLDER
-  fuel_can_only: true                # PLACEHOLDER
-  max_can_size_gallons: null         # unknown
+  # 9.10.2 caps total capacity at OEM plus two gallons, which is a property of
+  # the car rather than a series-wide number. Recorded as "no series constant";
+  # the car's own limit belongs on the event.
+  max_fuel_capacity_gallons: null
+  # Not addressed in the BCCR; still unverified.
+  refuel_allowed_under_yellow: null
+  # 8.2.6: fuelling only through a hose or dry break attached to a 5-gallon jug,
+  # no overhead or elevated rigs. 8.2.10: "THE USE OF ELECTRIC PUMP(S) TO REFILL
+  # YOUR FUEL JUGS IS NOT ALLOWED."
+  fuel_can_only: true
+  # 8.2.6: "All refueling jugs shall be DOT and/or ChampCar approved, with a
+  # maximum indicated capacity of five (5) gallons."
+  max_can_size_gallons: 5
 
 driver:
-  min_stint_seconds: 1800            # PLACEHOLDER (30 min)
-  max_stint_seconds: 7200            # PLACEHOLDER (2 h)
-  max_consecutive_stint_seconds: 7200 # PLACEHOLDER (2 h)
-  min_drivers_per_event: 2           # PLACEHOLDER
-  max_share_of_race: 0.6             # PLACEHOLDER
+  # No minimum stint length appears in the BCCR; 7.1 governs the maximum only.
+  min_stint_seconds: null
+  # 7.1.1: "no driver shall drive for more than 2 hours consecutively"
+  max_stint_seconds: 7200
+  max_consecutive_stint_seconds: 7200
+  # 7.1.1: "and shall have, at a minimum, sixty (60) minutes rest between
+  # stints."
+  min_rest_seconds: 3600
+  # 6.4.1: "8-Hours or less - Two (2) drivers minimum / 9-16-Hours - Three (3)
+  # drivers minimum / 17-hours and above - Four (4) drivers minimum"
+  min_drivers_per_event:
+    - min_race_hours: 0
+      drivers: 2
+    - min_race_hours: 9
+      drivers: 3
+    - min_race_hours: 17
+      drivers: 4
+  # No cap on one driver's share of the race appears in the BCCR.
+  max_share_of_race: null

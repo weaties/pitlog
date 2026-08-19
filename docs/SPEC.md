@@ -39,9 +39,15 @@ Standalone codebase. Reuses HelmLog *patterns* (TDD, CI/CD, CLAUDE.md + skills, 
 - [ ] GPS logger make/model and its GPX/log format
 - [ ] IMU part number and interface
 - [ ] Whether the race car has functional OBD2
-- [ ] Per-series rule details to encode: Lemons, Lucky Dog, ChampCar fueling/pit/driver rules (minimum stop times, fueling restrictions, driver-change rules)
-- [ ] Fall target race + date (drives the M1 cut line)
-- [ ] Project name
+- [x] Per-series rule details to encode: Lemons, Lucky Dog, ChampCar fueling/pit/driver rules.
+      Read from the published rulebooks on 2026-08-19 and encoded in
+      `config/series/*.yaml` with citations. Each config is `PARTIAL`: the fields
+      listed in its `verified_fields` are checked, and the handful that the
+      rulebooks simply do not address remain flagged on screen. **Which series
+      the fall race runs under is still unstated**, and that decides which
+      config the event should point at.
+- [x] Fall target race + date — **29 August 2026**
+- [x] Project name — **PitLog**
 - [ ] YouTube channel/account to use; unlisted vs public default
 - [ ] Clapper time source: own GPS module on the ESP32, or time sync from the car Pi (own GPS module keeps it usable when the Pi isn't installed)
 
@@ -155,7 +161,11 @@ LTE live telemetry, multi-team onboarding, auto-highlight video candidates (IMU 
 
 ## 9. Risks
 
-1. **Fall deadline** — 6-10 weeks. M1 scope is deliberately small; the planner solver is the only hard part. First real-race use should assume paper backup for stint planning.
+1. **Fall deadline** — the race is **29 August 2026**. This was written expecting
+   6-10 weeks and turned out to be days, not weeks; M1 is complete and merged,
+   so the risk is no longer scope but confidence. First real-race use should
+   still assume paper backup for stint planning, and the plan screen names
+   every rule value that has not been checked against a rulebook.
 2. **Video pipeline labor** — manual render/upload is a known-working path (per HelmLog experience) but costs Dan hours per weekend; acceptable trade. Clapper box is a small hardware build (ESP32 + GPS + LED + piezo + printed case) that should land in M2 alongside the linking UI.
 3. **Track connectivity** — assume none. Everything critical must work offline; sync is a bonus.
 4. **Timing API access** — Race Monitor/RaheHero API terms/availability for the specific series need verification before M2.

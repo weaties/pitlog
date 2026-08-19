@@ -1,6 +1,6 @@
 ---
 name: series-rules
-description: The per-series rule-config schema (fields, constraints, verification status) and the procedure for adding a new series or verifying an existing one. Encodes the UNVERIFIED discipline that SPEC §3 requires — the shipped Lemons/Lucky Dog/ChampCar values are placeholders and must not be guessed at. TRIGGER when touching config/series/*.yaml, packages/domain/src/series-rules.ts, the rule_configs table, or any planner code that consumes rule values. DO NOT trigger for unrelated schema work or UI changes.
+description: The per-series rule-config schema (fields, constraints, verification status) and the procedure for adding a new series or verifying an existing one. Encodes the never-guess discipline: the shipped Lemons/Lucky Dog/ChampCar configs were read from the rulebooks on 2026-08-19 and are PARTIAL, and the fields still unverified must never be filled in from memory. TRIGGER when touching config/series/*.yaml, packages/domain/src/series-rules.ts, the rule_configs table, or any planner code that consumes rule values. DO NOT trigger for unrelated schema work or UI changes.
 ---
 
 # Series rule configs
@@ -10,7 +10,32 @@ shipped defaults (`config/series/*.yaml`) and versioned JSON rows in
 `rule_configs` once an admin edits them. One schema governs both, in
 `packages/domain/src/series-rules.ts`.
 
-## The UNVERIFIED discipline — read this first
+## Where the shipped configs actually stand
+
+All three were read from the published rulebooks on **2026-08-19** and carry a
+`verification.source` naming the sections. All three are **PARTIAL**, not
+VERIFIED: a few fields the rulebooks simply do not address are still unverified
+and still show on the plan.
+
+They differ in ways that change a schedule, which is the whole reason these are
+data and not code:
+
+| | Lemons | Lucky Dog | ChampCar |
+|---|---|---|---|
+| minimum stop | none | 5 min | 5 min (fuel stops, pit-in to pit-out) |
+| driver change during fuelling | no | no | **yes** |
+| max stint | none | 2 h | 2 h |
+| rest between stints | none | 60 min | 60 min |
+| min drivers | 2, 3 from 24 h | per event pack | 2 / 3 / 4 by length |
+
+## `null` means "no such rule"
+
+A null is a **checked answer**, not a blank waiting to be filled. Lemons imposes
+no minimum stop and no stint limits at all; writing 1800 there would make the
+planner refuse legal Lemons schedules. If you find a null and think it looks
+unfinished, read the rulebook before touching it.
+
+## The never-guess discipline — read this first
 
 **SPEC §3 lists per-series rule details as an OPEN ITEM owned by Dan. Nobody
 has read the rulebooks yet.** Every value in every shipped config is a
@@ -63,10 +88,18 @@ fueling:
   max_can_size_gallons:          # > 0 or null
 
 driver:
-  min_stint_seconds:             # > 0
-  max_stint_seconds:             # >= min_stint_seconds (cross-field check)
+  min_stint_seconds:             # > 0, or null where the series imposes none
+  max_stint_seconds:             # >= min_stint_seconds when both are set
   max_consecutive_stint_seconds: # > 0
-  min_drivers_per_event:         # int > 0
+  min_rest_seconds:              # > 0, or null. Time out of the car between
+                                 # stints. Binds hard on a two-driver entry.
+  min_drivers_per_event:         # a list of tiers, because every series makes
+                                 # this a function of race length:
+                                 #   - min_race_hours: 0
+                                 #     drivers: 2
+                                 #   - min_race_hours: 9
+                                 #     drivers: 3
+                                 # Read longest-first by minDriversForRace().
   max_share_of_race:             # fraction in (0, 1]
 ```
 
@@ -86,6 +119,7 @@ Two subtleties in the implementation worth not undoing:
    file including its "!!! UNVERIFIED !!!" header — that header is load-bearing
    documentation, not boilerplate.
 2. **Keep `status: UNVERIFIED`** unless you have actually read the rulebook.
+   A search result, a forum post, or a summary of one is not a rulebook.
 3. **Register it in the seed:** add the key to `SERIES_KEYS` and give it a
    `SERIES_IDS` and `RULE_CONFIG_IDS` entry in `packages/db/src/seed-data.ts`.
    Ids are fixed UUIDs so reseeding is deterministic.

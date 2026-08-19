@@ -1,44 +1,90 @@
 # 24 Hours of Lemons — series rule config
 #
-# !!! UNVERIFIED !!!
-# SPEC §3 lists "per-series rule details to encode" as an OPEN ITEM owned by Dan.
-# Every number below is a structurally-valid PLACEHOLDER, not a real rule. They
-# exist so the schema, the migrations, and the planner's input plumbing can be
-# built and tested before the rulebooks are read. Do NOT plan a real race from
-# this file, and do NOT "improve" these numbers by guessing.
+# VERIFICATION: PARTIAL, checked against the official rulebook published at
+# https://24hoursoflemons.com/prices-rules/ (entry pricing on that page is
+# marked "effective 1/1/2026"), read 2026-08-19.
 #
-# To verify: read the current 24 Hours of Lemons rulebook, replace the values, add the
-# citation under `verification.source`, list the checked paths in
-# `verified_fields`, move `status` to PARTIAL/VERIFIED, and bump
-# `config_version`. See .claude/skills/series-rules/SKILL.md.
+# The fields listed under verification.verified_fields were read from that
+# rulebook and are quoted in the comments below. Everything else is still a
+# placeholder and the planner will keep saying so on screen.
+#
+# Note the shape of this series: Lemons imposes no minimum pit stop, no stint
+# limits and no rest requirement. Those nulls are CHECKED ANSWERS, not gaps —
+# see 5.1 and 3.3, which is where such rules would live if they existed.
 
 schema_version: 1
 series_key: lemons
 display_name: 24 Hours of Lemons
-config_version: 1
+config_version: 2
+
+notes: >-
+  Lemons allows fuelling either from team jugs in the hot pit or from the
+  track's own gas-station pumps where present (3.3.1.1). fuel_can_only records
+  the team-supplied case: a team may never use a rig or a motorised pump of its
+  own. Lemons states no minimum pit stop time and no stint limits at all, so a
+  Lemons plan is bound only by the tank, the roster and the crew's own pit
+  overhead.
 
 verification:
-  status: UNVERIFIED
-  source: null
-  checked_at: null
-  verified_fields: []
+  status: PARTIAL
+  source: >-
+    24 Hours of Lemons Official Rulebook, https://24hoursoflemons.com/prices-rules/
+    — sections 3.3.1.1, 3.3.1.2, 3.3.1.3, 3.8.1, 5.1, 5.1.4. Read 2026-08-19.
+  checked_at: '2026-08-19'
+  verified_fields:
+    - pit.min_stop_seconds
+    - pit.engine_off_for_fueling
+    - pit.driver_in_car_during_fueling
+    - pit.driver_change_during_fueling
+    - fueling.max_fuel_capacity_gallons
+    - fueling.fuel_can_only
+    - fueling.max_can_size_gallons
+    - driver.min_stint_seconds
+    - driver.max_stint_seconds
+    - driver.max_consecutive_stint_seconds
+    - driver.min_rest_seconds
+    - driver.min_drivers_per_event
+    - driver.max_share_of_race
 
 pit:
-  min_stop_seconds: 300              # PLACEHOLDER
-  engine_off_for_fueling: true       # PLACEHOLDER
-  driver_in_car_during_fueling: false # PLACEHOLDER
-  driver_change_during_fueling: false # PLACEHOLDER
-  max_crew_over_wall: null           # unknown
+  # No minimum stop time appears anywhere in the rulebook.
+  min_stop_seconds: null
+  # 3.3.1.2: "During fueling, the kill switch must be off"
+  engine_off_for_fueling: true
+  # 3.3.1.2: "no one can be in the car"
+  driver_in_car_during_fueling: false
+  # 3.3.1.2: "no one can be entering or exiting the car" — a driver change
+  # cannot overlap fuelling at all, so a Lemons stop is strictly sequential.
+  driver_change_during_fueling: false
+  # 3.3.1.2 asks for "at least two crew members" fuelling and "as few
+  # teammates as necessary" over the wall, but states no hard maximum.
+  max_crew_over_wall: null
 
 fueling:
-  max_fuel_capacity_gallons: null    # unknown
-  refuel_allowed_under_yellow: true  # PLACEHOLDER
-  fuel_can_only: true                # PLACEHOLDER
-  max_can_size_gallons: null         # unknown
+  # 3.8.1: "Maximum capacity (both actual and manufacturer stated) must be
+  # 24 gallons or less."
+  max_fuel_capacity_gallons: 24
+  # Not addressed in the rulebook; still unverified.
+  refuel_allowed_under_yellow: null
+  # 3.3.1.2: team fuelling must be from "handheld, gravity-fed, 5-gallon-or-less
+  # jugs". Track pumps are a separate allowance (3.3.1.1, 3.3.1.3).
+  fuel_can_only: true
+  # 3.3.1.2: "5-gallon-or-less jugs"
+  max_can_size_gallons: 5
 
 driver:
-  min_stint_seconds: 1800            # PLACEHOLDER (30 min)
-  max_stint_seconds: 7200            # PLACEHOLDER (2 h)
-  max_consecutive_stint_seconds: 7200 # PLACEHOLDER (2 h)
-  min_drivers_per_event: 2           # PLACEHOLDER
-  max_share_of_race: 0.6             # PLACEHOLDER
+  # Lemons imposes no stint length rules of any kind.
+  min_stint_seconds: null
+  max_stint_seconds: null
+  max_consecutive_stint_seconds: null
+  min_rest_seconds: null
+  # 5.1: "An Entry's minimum driver count is two"
+  # 5.1.4: "An Entry must have a minimum of three (3) drivers for full 24-hour
+  # or longer races."
+  min_drivers_per_event:
+    - min_race_hours: 0
+      drivers: 2
+    - min_race_hours: 24
+      drivers: 3
+  # No cap on one driver's share of the race appears in the rulebook.
+  max_share_of_race: null

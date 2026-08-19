@@ -3,9 +3,10 @@
 Milestones are from [`docs/SPEC.md`](docs/SPEC.md) §8. The spec is the source of
 truth; this file tracks what is done and breaks M1 into task-sized pieces.
 
-**Deadline pressure is real.** SPEC §9 puts the fall race 6–10 weeks out and
-names the planner solver as the only hard part. M1's cut line is deliberate:
-anything not on the M1 list waits, whatever it costs in polish.
+**The fall race is 29 August 2026.** SPEC §9 was written expecting 6–10 weeks
+and it turned out to be days. M1 is complete and merged, so the remaining risk
+is confidence rather than scope: run the app against a real weekend's data
+before trusting it, and keep a paper stint plan in the pit box.
 
 ---
 
@@ -37,7 +38,7 @@ implementation, no car-side code, no video linking UI, no deploy.
 
 ## M1 — Fall race MVP
 
-**Target: the fall race (SPEC §3 open item — date not yet set).**
+**Target: the fall race — 29 August 2026.**
 
 Cut line from SPEC §8: stint/fuel planner with live replanning; fill / stint /
 consumable / incident logging; expenses + receipts + splitting; offline PWA
@@ -50,10 +51,10 @@ The solver, the models behind it, and live replanning are done and live in
 `packages/domain`, database-free and browser-free. What is left here is the UI
 (#7, #10), which waits on the offline read path.
 
-**Nothing below changes the standing warning:** every shipped rule config is
-still UNVERIFIED, so the numbers a plan produces are structurally correct and
-factually unconfirmed. The solver reports which fields are guesses; #7 is what
-puts that on screen.
+**The rule configs are now read from the rulebooks** (2026-08-19) and carry
+citations, so a plan is no longer built entirely on placeholders. Each config
+is still `PARTIAL`: the handful of fields the rulebooks do not address remain
+flagged on the plan by name, which is what #7 puts on screen.
 
 - [x] **Burn-rate model.** Rolling estimate from (fill volume ÷ elapsed since
       last full tank). Only `filled_to_full` fills are datapoints. Returns an
@@ -146,12 +147,17 @@ against.
 
 ### Blocking open items (SPEC §3, owner: Dan)
 
-- [ ] **Per-series rule values for Lemons / Lucky Dog / ChampCar.** Until these
-      are read from rulebooks, every planner output is built on placeholders.
-      **This is the highest-value unblock in M1.**
-- [ ] **Fall target race + date** — sets the cut line.
+- [x] **Per-series rule values for Lemons / Lucky Dog / ChampCar** — read from
+      the published rulebooks on 2026-08-19 and encoded with citations. Each
+      config is `PARTIAL`; the few fields the rulebooks do not address are still
+      flagged on the plan.
+- [x] **Fall target race + date** — 29 August 2026.
+- [x] **Project name** — PitLog.
+- [ ] **Which series the fall race runs under**, so the event can point at the
+      right rule config. The three differ in ways that change a plan: a
+      ChampCar driver change may overlap fuelling and a Lemons one may not, and
+      Lemons imposes no minimum stop or stint limits at all.
 - [ ] **Hosting decision** (SPEC §6.4) — unblocks CD, SMTP, and receipt storage.
-- [ ] Project name.
 
 ---
 
