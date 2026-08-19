@@ -252,8 +252,19 @@ function offset(at: string | null, start: Date | null): number {
   return Math.max(0, Math.floor((new Date(at).getTime() - start.getTime()) / 1000))
 }
 
+/**
+ * The rule config for this race, or null.
+ *
+ * Null when the event names no series. It deliberately does NOT fall back to
+ * whichever config happens to come back first: the three shipped series differ
+ * in ways that change a schedule — a ChampCar driver change may overlap
+ * fuelling and a Lemons one may not — so guessing would produce a plan that
+ * looks authoritative and is bound by the wrong rulebook. The plan says "no
+ * series rules applied" instead, which is true and visible.
+ */
 function activeConfig(rules: ActiveRule[], seriesId: string | null): SeriesRulesConfig | null {
-  const match = seriesId ? rules.find((r) => r.series_id === seriesId) : rules[0]
+  if (!seriesId) return null
+  const match = rules.find((r) => r.series_id === seriesId)
   if (!match) return null
   try {
     return parseSeriesRules(match.config)
