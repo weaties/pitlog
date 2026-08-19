@@ -9,6 +9,7 @@
 
 import type { SyncRow, SyncTableName } from '@pitlog/sync'
 import { writeLocal } from './client.js'
+import { recordWriteFailure } from './writeFailures.js'
 
 export function newId(): string {
   return crypto.randomUUID()
@@ -39,7 +40,16 @@ export async function saveRow<T>(
     updated_by: context.userId,
   }
 
-  await writeLocal(table, stamped)
+  // A write that cannot reach the device is worse than one that cannot reach
+  // the server: the second is normal at a track, the first means the app is
+  // lying about what it stored. Surfaced rather than swallowed by the `void`
+  // at every call site.
+  try {
+    await writeLocal(table, stamped)
+  } catch (error) {
+    recordWriteFailure(error)
+    throw error
+  }
   return stamped
 }
 
@@ -52,11 +62,16 @@ export async function deleteRow<T>(
   row: SyncRow<T>,
   context: RowContext,
 ): Promise<void> {
-  await writeLocal(table, {
-    ...row,
-    team_id: context.teamId,
-    deleted_at: new Date(),
-    client_updated_at: new Date(),
-    updated_by: context.userId,
-  })
+  try {
+    await writeLocal(table, {
+      ...row,
+      team_id: context.teamId,
+      deleted_at: new Date(),
+      client_updated_at: new Date(),
+      updated_by: context.userId,
+    })
+  } catch (error) {
+    recordWriteFailure(error)
+    throw error
+  }
 }

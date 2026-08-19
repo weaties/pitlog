@@ -140,6 +140,16 @@ test('a driver who has to leave early is never given a stint past their time', a
 
   await expect(page.getByTestId('availability-summary')).toContainText('until 13:00')
 
+  // It has to survive a reload, and it has to reach the server. The first
+  // version of this feature did neither: the store it wrote to did not exist,
+  // every write threw, and nothing said so.
+  await expect(page.getByTestId('write-failure')).toHaveCount(0)
+  await page.getByTestId('sync-status').click()
+  await expect(page.getByTestId('sync-status')).toHaveText('Synced', { timeout: 20_000 })
+
+  await page.reload()
+  await expect(page.getByTestId('availability-summary')).toContainText('until 13:00')
+
   // Whatever the planner does next, it must either produce a plan that honours
   // the window or refuse and say why — never a schedule that ignores it.
   const refused = page.getByTestId('plan-refused')

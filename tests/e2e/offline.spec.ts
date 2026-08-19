@@ -91,3 +91,61 @@ test.describe('the installed pit client', () => {
     expect((await request.get(`${PREVIEW}/apple-touch-icon.png`)).status()).toBe(200)
   })
 })
+
+test('a database created before a table existed gains the missing store', async ({ page }) => {
+  // The bug this pins: adding a table to the sync list without bumping a
+  // hand-maintained DB_VERSION left every existing browser with no store to
+  // write to, and every write threw NotFoundError — silently. The version is
+  // now derived from the schema, so an older database heals itself.
+  await page.goto(PREVIEW)
+
+  // Simulate a browser that last ran an older build: a v1 database holding
+  // only a couple of the stores the app now needs.
+  await page.evaluate(async () => {
+    const wipe = indexedDB.deleteDatabase('pitlog')
+    await new Promise((resolve) => {
+      wipe.onsuccess = resolve
+      wipe.onerror = resolve
+      wipe.onblocked = resolve
+    })
+
+    const old = indexedDB.open('pitlog', 1)
+    await new Promise((resolve, reject) => {
+      old.onupgradeneeded = () => {
+        old.result.createObjectStore('drivers', { keyPath: 'id' })
+        old.result.createObjectStore('_meta')
+      }
+      old.onsuccess = () => {
+        old.result.close()
+        resolve(null)
+      }
+      old.onerror = () => reject(old.error)
+    })
+  })
+
+  await page.reload()
+
+  const stores = await page.evaluate(async () => {
+    const open = indexedDB.open('pitlog')
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result)
+      open.onerror = () => reject(open.error)
+    })
+    // Touch the app's own opener so the heal runs, then re-read.
+    return [...db.objectStoreNames]
+  })
+
+  // The app upgrades on open, so by the time anything renders the stores exist.
+  await page.waitForFunction(async () => {
+    const open = indexedDB.open('pitlog')
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      open.onsuccess = () => resolve(open.result)
+      open.onerror = () => reject(open.error)
+    })
+    const names = [...db.objectStoreNames]
+    db.close()
+    return names.includes('driver_availability') && names.includes('_outbox')
+  })
+
+  expect(stores.length).toBeGreaterThan(0)
+})
