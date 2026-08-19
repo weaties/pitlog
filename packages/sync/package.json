@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@pitlog/domain": "*"
+    "@pitlog/domain": "*",
+    "zod": "^4.4.3"
   }
 }

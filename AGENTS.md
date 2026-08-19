@@ -300,11 +300,23 @@ Reads stay ordinary REST for anything server-computed (the dashboard, the
 visitor view). Reads the pit client needs offline come from IndexedDB, hydrated
 by a pull on the same endpoint.
 
-**Still open, and owned by Phase 2:** the pull cursor. A bare
-`server_updated_at` timestamp drops rows written inside the same millisecond as
-the boundary. Either the cursor is `(server_updated_at, id)` with an overlap
-window, or the schema gains a monotonic sequence column — which is a migration,
-so it is decided before #21 and #23, not during them.
+**Resolved (M1 Phase 2): the cursor is a `server_updated_at` instant, and a
+pull re-reads a 60-second overlap window before it.**
+
+The problem is worse than timestamp resolution and a sequence column does not
+fix it. Postgres `now()` is *transaction start* time, so a transaction that
+begins at 10:00:00.000 and commits after one that began at 10:00:00.001 becomes
+invisible to any client that has already advanced its cursor past it. A
+`bigserial` has the same hazard, because the value is assigned at insert rather
+than at commit — it would buy a migration and fix nothing. Closing the gap
+properly needs snapshot-based cursors or a commit-time outbox, which is far
+more machinery than 2-4 people and one car justify.
+
+Re-reading the last minute closes it instead, and is safe because replaying a
+write is a proven no-op — `packages/sync/src/merge.test.ts` pins that from both
+directions. The window only has to outlast the longest write transaction, which
+here is a single batch insert. The cost of being generous is a few idempotent
+re-merges; the cost of being wrong is a fill that never arrives.
 
 ### Deliberate deviations from HelmLog conventions
 

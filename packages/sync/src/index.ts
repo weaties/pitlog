@@ -11,11 +11,7 @@
  * `server_updated_at`.
  */
 
+export * from './apply.js'
 export * from './merge.js'
-
-/**
- * Bumped when the wire shape of a sync batch changes incompatibly. A pit
- * client that has been offline for a weekend may be a version behind, and the
- * server needs to say so rather than misparse the batch.
- */
-export const SYNC_PROTOCOL_VERSION = 1
+export * from './protocol.js'
+export * from './tables.js'
