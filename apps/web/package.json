@@ -13,7 +13,8 @@
     "@tanstack/react-query": "^5.66.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.1.0"
+    "react-router-dom": "^7.1.0",
+    "@pitlog/sync": "*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",
