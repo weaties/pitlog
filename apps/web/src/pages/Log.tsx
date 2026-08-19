@@ -17,6 +17,7 @@ import { applyDriverIn, applyDriverOut, openStint } from '@pitlog/domain'
 import type { SyncRow } from '@pitlog/sync'
 import { useState } from 'react'
 import { useCurrentTeam } from '../lib/team.js'
+import { Conflicts } from '../offline/Conflicts.js'
 import { useLocalTable, useRefreshLocal } from '../offline/useLocalTable.js'
 import { useSync } from '../offline/useSync.js'
 import { newId, saveRow } from '../offline/write.js'
@@ -174,6 +175,8 @@ export function LogPage() {
 
   return (
     <Shell title="Log" sync={sync}>
+      <Conflicts teamId={teamId} userId={userId} nameFor={() => 'Another device'} />
+
       <Card className="flex items-center justify-between">
         <div>
           <p className="text-pit-muted text-sm">On track</p>

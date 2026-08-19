@@ -10,6 +10,7 @@
  * call — is one forgotten argument away from a cross-tenant write.
  */
 
+import { randomUUID } from 'node:crypto'
 import type { Db } from '@pitlog/db'
 import * as s from '@pitlog/db/schema'
 import type { SyncRow, SyncStore, SyncTableName } from '@pitlog/sync'
@@ -74,6 +75,27 @@ export function createSyncStore(db: Db, teamId: string): SyncStore {
           .values(values as never)
           .onConflictDoUpdate({ target: table.id, set: values as never })
       }
+    },
+
+    async recordSuperseded(rows) {
+      if (rows.length === 0) return
+
+      // Append-only. Nothing here is ever updated or deleted, which is what
+      // makes last-write-wins survivable: whoever typed the losing value can
+      // always find out what became of it.
+      await db.insert(s.row_versions).values(
+        rows.map((row) => ({
+          id: randomUUID(),
+          team_id: teamId,
+          table_name: row.table,
+          row_id: row.previous.id,
+          snapshot: row.previous as unknown as Record<string, unknown>,
+          client_updated_at: new Date(row.previous.client_updated_at),
+          updated_by: row.previous.updated_by,
+          superseded_by: row.supersededBy,
+          was_conflict: row.wasConflict,
+        })),
+      )
     },
   }
 }

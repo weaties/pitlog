@@ -618,6 +618,53 @@ export const telemetry_files = pgTable(
 )
 
 // ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+/**
+ * Superseded versions of syncable rows — SPEC §5.2 "editable with history",
+ * and the evidence behind conflict surfacing (SPEC §6.2).
+ *
+ * One mechanism serves both, because they are the same event seen from two
+ * angles: something was overwritten. A correction the same person made is
+ * history; an overwrite of somebody *else's* value is a conflict worth
+ * interrupting them about. `superseded_by` records which write did it.
+ *
+ * Append-only. Rows here are never updated and never deleted, which is what
+ * makes last-write-wins survivable: the person whose value lost can always
+ * find out what they entered.
+ */
+export const row_versions = pgTable(
+  'row_versions',
+  {
+    id: uuid('id').primaryKey(),
+    team_id: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    /** The table the superseded row belongs to, e.g. `fuel_fills`. */
+    table_name: text('table_name').notNull(),
+    /** The client-generated id of the row, stable across every version. */
+    row_id: uuid('row_id').notNull(),
+    /** The whole previous row, as it was before being overwritten. */
+    snapshot: jsonb('snapshot').notNull(),
+    /** The losing write's own comparator and author. */
+    client_updated_at: timestamp('client_updated_at', { withTimezone: true }).notNull(),
+    updated_by: uuid('updated_by'),
+    /** Who overwrote it. Null when the writer was unattributed. */
+    superseded_by: uuid('superseded_by'),
+    /** True when the winner was a different person — see `mergeRow`. */
+    was_conflict: boolean('was_conflict').notNull().default(false),
+    /** Cleared when a human has looked at it. Only meaningful for conflicts. */
+    acknowledged_at: timestamp('acknowledged_at', { withTimezone: true }),
+    recorded_at: timestamp('recorded_at', { withTimezone: true }).notNull().default(now),
+  },
+  (t) => [
+    index('row_versions_row_idx').on(t.team_id, t.table_name, t.row_id),
+    index('row_versions_conflict_idx').on(t.team_id, t.was_conflict, t.recorded_at),
+  ],
+)
+
+// ---------------------------------------------------------------------------
 // Generic log
 // ---------------------------------------------------------------------------
 
