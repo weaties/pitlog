@@ -36,42 +36,47 @@ test('an expense splits evenly and shows up in the ledger', async ({ page }) => 
   await expect(page.getByTestId('ledger')).toContainText(/\$\d+\.\d{2}/)
 })
 
-test('a split that cannot divide still adds up to the expense', async ({ page }) => {
+test('an even split adds up to the expense to the cent', async ({ page }) => {
   await openMoney(page)
 
+  // A unique description so this test can find its own rows: every browser
+  // test shares one database, and a pull brings everyone else's in too.
+  const description = `Coffee run ${Date.now()}`
+
   await page.getByTestId('add-expense').click()
-  await page.getByTestId('expense-description').fill('Coffee run')
-  // $10.00 over three people is 333, 333, 334.
+  await page.getByTestId('expense-description').fill(description)
   await page.getByTestId('expense-amount').fill('10.00')
   await page.getByTestId('save-expense').click()
 
   await page.getByTestId('sync-status').click()
   await expect(page.getByTestId('sync-status')).toHaveText('Synced', { timeout: 15_000 })
 
-  const shares = await page.evaluate(async () => {
+  const mine = await page.evaluate(async (wanted) => {
     const open = indexedDB.open('pitlog')
     const db: IDBDatabase = await new Promise((r, j) => {
       open.onsuccess = () => r(open.result)
       open.onerror = () => j(open.error)
     })
-    const req = db.transaction('expense_shares', 'readonly').objectStore('expense_shares').getAll()
-    return new Promise<{ share_cents: number; expense_id: string }[]>((r, j) => {
-      req.onsuccess = () => r(req.result)
-      req.onerror = () => j(req.error)
-    })
-  })
+    const read = <T>(store: string) =>
+      new Promise<T[]>((r, j) => {
+        const req = db.transaction(store, 'readonly').objectStore(store).getAll()
+        req.onsuccess = () => r(req.result)
+        req.onerror = () => j(req.error)
+      })
 
-  const byExpense = new Map<string, number[]>()
-  for (const s of shares) {
-    byExpense.set(s.expense_id, [...(byExpense.get(s.expense_id) ?? []), s.share_cents])
-  }
-  const tenDollars = [...byExpense.values()].find(
-    (values) => values.reduce((a, b) => a + b, 0) === 1000,
-  )
+    const expenses = await read<{ id: string; description: string }>('expenses')
+    const expense = expenses.find((e) => e.description === wanted)
+    const shares = await read<{ expense_id: string; share_cents: number }>('expense_shares')
+    return shares.filter((s) => s.expense_id === expense?.id).map((s) => s.share_cents)
+  }, description)
 
-  expect(tenDollars).toBeDefined()
-  // Nobody is more than a cent off anybody else.
-  expect(Math.max(...(tenDollars ?? [])) - Math.min(...(tenDollars ?? []))).toBe(1)
+  expect(mine.length).toBeGreaterThan(1)
+  // The invariant that holds for any roster size: the shares add up exactly,
+  // and nobody carries more than a cent more than anybody else. Whether a
+  // remainder exists at all depends on the headcount, so the exact 333/333/334
+  // case is pinned in the domain unit tests instead.
+  expect(mine.reduce((a, b) => a + b, 0)).toBe(1000)
+  expect(Math.max(...mine) - Math.min(...mine)).toBeLessThanOrEqual(1)
 })
 
 test('a receipt never holds up the expense', async ({ page }) => {
@@ -97,20 +102,48 @@ test('a receipt never holds up the expense', async ({ page }) => {
   await expect(page.getByTestId('receipt-state')).toContainText('waiting to upload')
 })
 
-test('the ledger nets out and settling clears it', async ({ page }) => {
+test('settling marks shares square without deleting them', async ({ page }) => {
   await openMoney(page)
 
+  const description = `Fuel jugs ${Date.now()}`
   await page.getByTestId('add-expense').click()
-  await page.getByTestId('expense-description').fill('Fuel jugs')
+  await page.getByTestId('expense-description').fill(description)
   await page.getByTestId('expense-amount').fill('60.00')
   await page.getByTestId('save-expense').click()
 
   await expect(page.getByTestId('ledger')).toBeVisible()
-  const settle = page.getByTestId('ledger').getByRole('button', { name: 'Settle' }).first()
-  await settle.click()
 
-  // Settled shares stay in the history; they just stop being owed.
-  await expect(page.getByTestId('expenses')).toContainText('Fuel jugs')
+  const countSettled = () =>
+    page.evaluate(async () => {
+      const open = indexedDB.open('pitlog')
+      const db: IDBDatabase = await new Promise((r, j) => {
+        open.onsuccess = () => r(open.result)
+        open.onerror = () => j(open.error)
+      })
+      const req = db
+        .transaction('expense_shares', 'readonly')
+        .objectStore('expense_shares')
+        .getAll()
+      const rows: { id: string; settled_at: string | null }[] = await new Promise((r, j) => {
+        req.onsuccess = () => r(req.result)
+        req.onerror = () => j(req.error)
+      })
+      return {
+        ids: rows.map((x) => x.id),
+        settled: rows.filter((x) => x.settled_at !== null).length,
+      }
+    })
+
+  const before = await countSettled()
+  await page.getByTestId('ledger').getByRole('button', { name: 'Settle' }).first().click()
+  await expect.poll(async () => (await countSettled()).settled).toBeGreaterThan(before.settled)
+
+  // Settled is not deleted. Asserted as "nothing disappeared" rather than a
+  // row count: a background pull can add rows at any moment, and a total is
+  // not this test's to own.
+  const after = await countSettled()
+  for (const id of before.ids) expect(after.ids).toContain(id)
+  await expect(page.getByTestId('expenses')).toContainText(description)
 })
 
 test('crew can add an expense but only an admin can settle', async ({ page }) => {
