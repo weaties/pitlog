@@ -46,6 +46,29 @@ export const UNMODELLED_RULE_FIELDS: readonly string[] = [
   'fueling.max_can_size_gallons',
 ]
 
+/**
+ * The stop length actually planned for: whichever is longer, the time the crew
+ * expects to take or the minimum the series imposes. A series minimum is a
+ * floor on how long you must sit there, not a target.
+ */
+export function effectivePitStopSeconds(
+  pitStopSeconds: number,
+  rules: SeriesRulesConfig | null,
+): number {
+  return Math.max(pitStopSeconds, rules?.pit.min_stop_seconds ?? 0)
+}
+
+/** The car's tank, or the series cap on it, whichever is smaller. */
+export function effectiveFuelCapacityGallons(
+  fuelCapacityGallons: number,
+  rules: SeriesRulesConfig | null,
+): number {
+  return Math.min(
+    fuelCapacityGallons,
+    rules?.fueling.max_fuel_capacity_gallons ?? Number.POSITIVE_INFINITY,
+  )
+}
+
 export interface PlanRuleConfig {
   seriesKey: string
   configVersion: number

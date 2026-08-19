@@ -32,7 +32,12 @@
 import type { BurnRateEstimate } from './burn-rate.js'
 import type { SeriesRulesConfig } from './series-rules.js'
 import type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
-import { buildAssumptions, describeRules } from './stint-rules.js'
+import {
+  buildAssumptions,
+  describeRules,
+  effectiveFuelCapacityGallons,
+  effectivePitStopSeconds,
+} from './stint-rules.js'
 import {
   assignDrivers,
   distributeSeconds,
@@ -41,7 +46,12 @@ import {
 } from './stint-schedule.js'
 
 export type { PlanAssumption, PlanRuleConfig } from './stint-rules.js'
-export { CONSUMED_RULE_FIELDS, UNMODELLED_RULE_FIELDS } from './stint-rules.js'
+export {
+  CONSUMED_RULE_FIELDS,
+  effectiveFuelCapacityGallons,
+  effectivePitStopSeconds,
+  UNMODELLED_RULE_FIELDS,
+} from './stint-rules.js'
 
 /** A runaway guard. A 24-hour race on 30-minute stints is 48. */
 const MAX_STINTS = 200
@@ -168,11 +178,8 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
   const rules = input.rules
   const fairnessWeight = input.fairnessWeight ?? 0.5
 
-  const pitStopSeconds = Math.max(input.pitStopSeconds, rules?.pit.min_stop_seconds ?? 0)
-  const fuelCapacityGallons = Math.min(
-    input.fuelCapacityGallons,
-    rules?.fueling.max_fuel_capacity_gallons ?? Number.POSITIVE_INFINITY,
-  )
+  const pitStopSeconds = effectivePitStopSeconds(input.pitStopSeconds, rules)
+  const fuelCapacityGallons = effectiveFuelCapacityGallons(input.fuelCapacityGallons, rules)
   const startFuelGallons = Math.min(
     input.startFuelGallons ?? fuelCapacityGallons,
     fuelCapacityGallons,
@@ -313,7 +320,10 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
   if (!assigned) return null
 
   const bounds = assigned.map((driver, index) => stintBounds(a, driver, index === 0))
-  if (bounds.some((b) => b.min > b.max)) return null
+  // A stint with no room in it is not a stint. Without this a driver already
+  // at their maximum would be "planned" a zero-length run rather than the
+  // schedule reporting that they have to get out of the car.
+  if (bounds.some((b) => b.min > b.max || b.max <= 0)) return null
 
   const lengths = distributeSeconds(a.driveSeconds, bounds)
   if (!lengths) return null
