@@ -13,7 +13,8 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '@pitlog/db'
 import * as s from '@pitlog/db/schema'
-import type { SyncRow, SyncStore, SyncTableName } from '@pitlog/sync'
+import type { PullableTableName, SyncRow, SyncStore, SyncTableName } from '@pitlog/sync'
+import { PULLABLE_TABLES } from '@pitlog/sync'
 import { and, eq, gt, inArray } from 'drizzle-orm'
 
 /** The tables a pit client may write, mapped to their Drizzle definitions. */
@@ -38,6 +39,9 @@ export function syncTable(name: SyncTableName) {
 }
 
 export const SYNC_TABLE_NAMES = Object.keys(TABLES) as SyncTableName[]
+
+/** Writable tables plus the read-only ones the client keeps a copy of. */
+const PULLABLE = { ...TABLES, laps: s.laps } as const
 
 /**
  * A store scoped to one team.
@@ -111,11 +115,11 @@ export async function loadChangesSince(
   db: Db,
   teamId: string,
   floor: Date | null,
-): Promise<{ table: SyncTableName; rows: SyncRow[] }[]> {
-  const changes: { table: SyncTableName; rows: SyncRow[] }[] = []
+): Promise<{ table: PullableTableName; rows: SyncRow[] }[]> {
+  const changes: { table: PullableTableName; rows: SyncRow[] }[] = []
 
-  for (const name of SYNC_TABLE_NAMES) {
-    const table = TABLES[name]
+  for (const name of PULLABLE_TABLES) {
+    const table = PULLABLE[name]
     const scope =
       floor === null
         ? eq(table.team_id, teamId)

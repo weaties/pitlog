@@ -12,11 +12,13 @@
  * instead, where it is tested without a browser.
  */
 
-import type { QueuedWrite, QueueStorage, SyncRow, SyncTableName } from '@pitlog/sync'
-import { SYNC_TABLES } from '@pitlog/sync'
+import type { PullableTableName, QueuedWrite, QueueStorage, SyncRow } from '@pitlog/sync'
+import { PULLABLE_TABLES } from '@pitlog/sync'
 
 const DB_NAME = 'pitlog'
-const DB_VERSION = 1
+// Bumped to 2 when `laps` became readable on the device (#15): tyre life is
+// derived from laps, never typed, so the client needs a local copy.
+const DB_VERSION = 2
 const QUEUE_STORE = '_outbox'
 const META_STORE = '_meta'
 
@@ -40,7 +42,7 @@ export function openLocalDb(): Promise<IDBDatabase> {
       // One object store per syncable table, keyed on the client-generated id.
       // Ids are assigned on the device and never renumbered, so the primary
       // key is stable from the moment a write is made.
-      for (const table of SYNC_TABLES) {
+      for (const table of PULLABLE_TABLES) {
         if (!db.objectStoreNames.contains(table)) db.createObjectStore(table, { keyPath: 'id' })
       }
       if (!db.objectStoreNames.contains(QUEUE_STORE)) {
@@ -58,7 +60,7 @@ export function openLocalDb(): Promise<IDBDatabase> {
 
 /** Rows a screen should show: soft-deleted rows are excluded, per the skill. */
 export async function readTable<T = Record<string, unknown>>(
-  table: SyncTableName,
+  table: PullableTableName,
 ): Promise<SyncRow<T>[]> {
   const db = await openLocalDb()
   const rows = await promisify<SyncRow<T>[]>(
@@ -69,14 +71,14 @@ export async function readTable<T = Record<string, unknown>>(
 
 /** Including soft-deleted rows — for history and conflict views only. */
 export async function readTableWithDeleted<T = Record<string, unknown>>(
-  table: SyncTableName,
+  table: PullableTableName,
 ): Promise<SyncRow<T>[]> {
   const db = await openLocalDb()
   return promisify<SyncRow<T>[]>(db.transaction(table, 'readonly').objectStore(table).getAll())
 }
 
 export async function writeRows<T>(
-  table: SyncTableName,
+  table: PullableTableName,
   rows: readonly SyncRow<T>[],
 ): Promise<void> {
   if (rows.length === 0) return
