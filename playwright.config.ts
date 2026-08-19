@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const WEB_PORT = 5173
+/** A production build with a live service worker, for the offline test. */
+const PREVIEW_PORT = 4173
 const API_PORT = Number(process.env.API_PORT ?? 8787)
 
 /**
@@ -36,6 +38,17 @@ export default defineConfig({
       command: 'npm run dev -w @pitlog/web',
       url: `http://localhost:${WEB_PORT}`,
       reuseExistingServer: !process.env.CI,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+    {
+      // The service worker only exists in a build, and "does it open with the
+      // network off" is the one claim the PWA has to make (#25). Testing it
+      // against the dev server would prove nothing.
+      command: 'npm run build -w @pitlog/web && npm run preview -w @pitlog/web',
+      url: `http://localhost:${PREVIEW_PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
       stdout: 'pipe',
       stderr: 'pipe',
     },

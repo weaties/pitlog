@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App.js'
+import { UpdatePrompt } from './offline/UpdatePrompt.js'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -21,6 +22,15 @@ createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <App />
+        {/*
+          Mounted here rather than inside <App /> so that registering the
+          service worker never waits on anything. <App /> returns early while
+          it asks the server who you are, and a user whose first ever visit is
+          from a pit box with no signal would then never get a service worker
+          at all — the app would be permanently unable to work offline, which
+          is precisely backwards.
+        */}
+        <UpdatePrompt />
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,
