@@ -5,6 +5,9 @@ export interface DbOptions {
   databaseUrl: string
   /** Keep this at 1 for CLI scripts (migrate/seed) so the process can exit. */
   max?: number
+  /** Swallow Postgres NOTICE output. The seed's `truncate ... cascade` emits
+   *  one notice per reached table, which buries the actual progress log. */
+  quiet?: boolean
 }
 
 /**
@@ -16,7 +19,10 @@ export interface DbOptions {
  * scope is visible in the query rather than hidden in a wrapper.
  */
 export function createDb(options: DbOptions) {
-  const sql = postgres(options.databaseUrl, { max: options.max ?? 10 })
+  const sql = postgres(options.databaseUrl, {
+    max: options.max ?? 10,
+    ...(options.quiet ? { onnotice: () => {} } : {}),
+  })
   const db = drizzle(sql)
   return { db, sql, close: () => sql.end({ timeout: 5 }) }
 }
