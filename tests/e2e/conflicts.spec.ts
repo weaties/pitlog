@@ -181,3 +181,34 @@ test('an edit somebody makes to their own entry is history, not an alarm', async
   const versions = (await history.json()) as { versions: { snapshot: { gallons: string } }[] }
   expect(versions.versions[0]?.snapshot.gallons).toBe('11.10')
 })
+
+test('a pull never overwrites a local edit that has not synced yet', async ({ page, context }) => {
+  // The pull used to write server rows straight over whatever was on the
+  // device, so an edit made seconds earlier — still sitting in the outbox —
+  // was silently replaced by the server's older copy. That is the exact
+  // failure last-write-wins exists to prevent.
+  const teamId = await signIn(page)
+
+  await page.getByRole('link', { name: 'Team' }).click()
+  await expect(page.getByTestId('roster')).toBeVisible()
+
+  // Go offline so the edit cannot drain, then make one.
+  await context.setOffline(true)
+  const name = `Locally edited ${Date.now()}`
+  await page.getByTestId('add-driver').click()
+  await page.getByTestId('driver-first-name').fill(name)
+  await page.getByTestId('save-driver').click()
+  await expect(page.getByText(name)).toBeVisible()
+
+  // Back online: the very next cycle pushes *and* pulls. The pulled copy of
+  // the roster must not clobber the row that has only just been written.
+  await context.setOffline(false)
+  await page.getByTestId('sync-status').click()
+  await expect(page.getByTestId('sync-status')).toHaveText('Synced', { timeout: 20_000 })
+
+  await expect(page.getByText(name)).toBeVisible()
+
+  // And it really did reach the server, rather than merely surviving locally.
+  const rows = await page.request.get(`${API}/api/teams/${teamId}/sync`)
+  expect(await rows.text()).toContain(name)
+})

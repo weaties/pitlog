@@ -8,23 +8,38 @@
  */
 
 import type {
+  PullableTableName,
   SyncPushRequest,
   SyncPushResponse,
   SyncRow,
   SyncTableName,
   SyncWriteResult,
 } from '@pitlog/sync'
-import { drainOnce, enqueue, queueDepth } from '@pitlog/sync'
+import { drainOnce, enqueue, mergeAll, queueDepth } from '@pitlog/sync'
 import { api } from '../lib/api.js'
-import { idbQueueStorage, readMeta, writeMeta, writeRows } from './idb.js'
+import { idbQueueStorage, readMeta, readTableWithDeleted, writeMeta, writeRows } from './idb.js'
 
 const CURSOR_KEY = 'sync.cursor'
 const SEQ_KEY = 'sync.nextSeq'
 
 export interface PullResponse {
   protocolVersion: number
-  changes: { table: SyncTableName; rows: SyncRow[] }[]
+  changes: { table: PullableTableName; rows: SyncRow[] }[]
   cursor: string
+}
+
+/**
+ * JSON has no dates, so a pulled row arrives with its comparator as a string.
+ * The merge compares instants, and `'2026-08-19T12:00:00Z' < '2026-08-19T13:00:00Z'`
+ * happens to be true for ISO strings — which is exactly the kind of accident
+ * that works until a timezone or a millisecond makes it stop.
+ */
+function reviveDates(row: SyncRow): SyncRow {
+  return {
+    ...row,
+    client_updated_at: new Date(row.client_updated_at),
+    deleted_at: row.deleted_at === null ? null : new Date(row.deleted_at),
+  }
 }
 
 function transport(teamId: string) {
@@ -96,8 +111,32 @@ export async function syncOnce(teamId: string): Promise<SyncRunResult> {
       const response = await api<PullResponse>(`/api/teams/${teamId}/sync${query}`)
 
       for (const change of response.changes) {
-        await writeRows(change.table, change.rows)
-        pulled += change.rows.length
+        // Merged, never blindly written. A pull used to overwrite whatever was
+        // on the device, so an edit made seconds earlier — and still sitting in
+        // the outbox — was silently replaced by the server's older copy. That
+        // is the exact failure last-write-wins exists to prevent, and the rule
+        // for deciding it already lived one import away.
+        const held = new Map(
+          (await readTableWithDeleted(change.table)).map((row) => [row.id, row as SyncRow]),
+        )
+        const decisions = mergeAll(held, change.rows.map(reviveDates))
+
+        const winners = decisions
+          .filter((d) => d.outcome === 'insert' || d.outcome === 'incoming_wins')
+          .map((d) => d.winner)
+
+        await writeRows(change.table, winners)
+        for (const decision of decisions) {
+          if (decision.conflict && decision.loser) {
+            conflicts.push({
+              table: change.table,
+              id: decision.winner.id,
+              outcome: decision.outcome,
+              loser: decision.loser,
+            })
+          }
+        }
+        pulled += winners.length
       }
       await writeMeta(CURSOR_KEY, response.cursor)
     } catch {

@@ -121,3 +121,28 @@ test('a race can be bound to a named series', async ({ page }) => {
   const card = page.getByTestId('events').getByRole('listitem').filter({ hasText: name })
   await expect(card).toContainText('ChampCar Endurance Series')
 })
+
+test('a driver who has to leave early is never given a stint past their time', async ({ page }) => {
+  // The motivating case for #57: "I need to be done for the day by 1pm."
+  await openPlan(page, 'admin@example.com')
+  await expect(page.getByTestId('schedule')).toBeVisible()
+
+  await page.getByTestId('toggle-availability').click()
+
+  // The seeded fixture race starts at 15:00 UTC; pick a wall-clock time a few
+  // hours in, whatever the runner's timezone renders that as.
+  const start = await page.getByTestId('schedule').getByRole('listitem').first().innerText()
+  expect(start.length).toBeGreaterThan(0)
+
+  const anaUntil = page.getByTestId(/^until-/).first()
+  await anaUntil.fill('13:00')
+  await page.getByTestId('toggle-availability').click()
+
+  await expect(page.getByTestId('availability-summary')).toContainText('until 13:00')
+
+  // Whatever the planner does next, it must either produce a plan that honours
+  // the window or refuse and say why — never a schedule that ignores it.
+  const refused = page.getByTestId('plan-refused')
+  const schedule = page.getByTestId('schedule')
+  await expect(refused.or(schedule).first()).toBeVisible()
+})

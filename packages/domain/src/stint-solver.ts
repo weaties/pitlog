@@ -29,6 +29,7 @@
  * from this module as though it were authoritative.
  */
 
+import { conflictingPins, coverageGaps, expectedSeatTime } from './availability.js'
 import type { BurnRateEstimate } from './burn-rate.js'
 import type { SeriesRulesConfig } from './series-rules.js'
 import { minDriversForRace } from './series-rules.js'
@@ -43,6 +44,7 @@ import {
   assignDrivers,
   distributeSeconds,
   stintBounds,
+  withinAvailability,
   withinConsecutiveCap,
   withinRestRequirement,
 } from './stint-schedule.js'
@@ -68,6 +70,30 @@ export interface PlannerDriver {
   maxStintSeconds: number | null
   /** Multiplier on the team burn rate — see `estimateDriverBurnRates`. */
   burnRateFactor: number
+  /**
+   * When this driver can be in the car, as offsets from the plan's zero.
+   * Null at either end means unbounded.
+   *
+   * A window is a *hard* constraint, unlike roster order: it can make a plan
+   * impossible, and then the planner has to say whose window did it.
+   */
+  availableFromSeconds?: number | null
+  availableUntilSeconds?: number | null
+  /**
+   * Force this driver into one stint, numbered from 1.
+   *
+   * The blunter instrument. A window says "I have to leave by one"; a pin says
+   * "I am taking the start". Both are honoured, and they can contradict each
+   * other, in which case the plan is refused rather than quietly resolved.
+   */
+  pinnedSequence?: number | null
+}
+
+/** Seconds of `raceSeconds` this driver could be in the car at all. */
+export function availableSeconds(driver: PlannerDriver, raceSeconds: number): number {
+  const from = Math.max(0, driver.availableFromSeconds ?? 0)
+  const until = Math.min(raceSeconds, driver.availableUntilSeconds ?? raceSeconds)
+  return Math.max(0, until - from)
 }
 
 export interface StintPlanInput {
@@ -161,6 +187,8 @@ export type StintPlanFailureReason =
   | 'share_cap_unsatisfiable'
   | 'stint_bounds_unsatisfiable'
   | 'fuel_window_below_minimum_stint'
+  | 'availability_gap'
+  | 'conflicting_pins'
   | 'race_complete'
 
 export type StintPlanResult =
@@ -217,6 +245,23 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
     )
   }
 
+  // Checked before the search, so a refusal can name the hole rather than
+  // reporting that no stint count happened to work. This is the failure people
+  // actually hit: somebody leaves at one o'clock and nobody else is there.
+  const gaps = coverageGaps(eligible, input.raceSeconds)
+  if (gaps.length > 0) {
+    const gap = gaps[0]
+    return fail(
+      'availability_gap',
+      `Nobody is available to drive from ${clock(gap?.fromSeconds ?? 0)} to ${clock(gap?.untilSeconds ?? 0)} into the race.`,
+    )
+  }
+
+  const pinConflicts = conflictingPins(eligible)
+  if (pinConflicts.length > 0) {
+    return fail('conflicting_pins', `Two drivers cannot take the same stint: ${pinConflicts[0]}.`)
+  }
+
   const probe: ScheduleContext = {
     stintCount: 1,
     driveSeconds: input.raceSeconds,
@@ -231,6 +276,7 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
     reserveGallons: input.reserveGallons,
     burnRateGph: input.burnRate.gph,
     fromNow: input.fromNow ?? null,
+    expectedSeat: expectedSeatTime(eligible, input.raceSeconds, input.raceSeconds),
   }
 
   // A first stint that runs the tank to reserve before reaching the shortest
@@ -265,6 +311,7 @@ export function solveStintPlan(input: StintPlanInput): StintPlanResult {
       reserveGallons: input.reserveGallons,
       burnRateGph: input.burnRate.gph,
       fromNow: input.fromNow ?? null,
+      expectedSeat: expectedSeatTime(eligible, input.raceSeconds, driveSeconds),
     })
 
     if (attempt) {
@@ -306,6 +353,11 @@ export interface ScheduleContext {
   reserveGallons: number
   burnRateGph: number
   fromNow: PlanFromNow | null
+  /**
+   * What each driver should be expected to drive, given how long they are
+   * around. Equal shares when nobody has a window — see `expectedSeatTime`.
+   */
+  expectedSeat: ReadonlyMap<string, number>
 }
 
 type Attempt = Pick<
@@ -354,10 +406,21 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
   const seatValues = Object.values(seatTime)
   const spread = Math.max(...seatValues) - Math.min(...seatValues)
   const averageSeat = seatValues.reduce((sum, v) => sum + v, 0) / seatValues.length
-  if (spread > (1 - a.fairnessWeight) * averageSeat) return null
+
+  // Fairness is measured against what each driver could have driven, not
+  // against an equal split. Somebody who has to leave at lunchtime will take
+  // less of the race, and treating that as unfairness would send the search
+  // after a plan that does not exist. With nobody restricted, every
+  // expectation is the equal share and this is the old check exactly.
+  const deviations = Object.entries(seatTime).map(
+    ([id, seconds]) => seconds - (a.expectedSeat.get(id) ?? averageSeat),
+  )
+  const unfairness = Math.max(...deviations) - Math.min(...deviations)
+  if (unfairness > (1 - a.fairnessWeight) * averageSeat) return null
 
   if (!withinConsecutiveCap(a, assigned, lengths)) return null
   if (!withinRestRequirement(a, assigned, lengths)) return null
+  if (!withinAvailability(a, assigned, lengths)) return null
 
   const stints: PlannedStint[] = []
   const fills: PlannedFill[] = []
@@ -404,6 +467,13 @@ function tryStintCount(a: ScheduleContext): Attempt | null {
 
 function fail(reason: StintPlanFailureReason, detail: string): StintPlanResult {
   return { ok: false, reason, detail }
+}
+
+/** Race-relative time, for a refusal a human has to act on. */
+function clock(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  return `${h}h ${String(m).padStart(2, '0')}m`
 }
 
 /** Trim binary-float dust so a plan compares equal to the one beside it. */

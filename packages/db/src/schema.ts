@@ -345,6 +345,19 @@ export const drivers = pgTable(
     max_stint_seconds: integer('max_stint_seconds'),
     /** Multiplier on the team burn rate once enough data exists — SPEC §5.1. */
     burn_rate_factor: numeric('burn_rate_factor', { precision: 5, scale: 3 }),
+    /**
+     * Where this driver sits in the running order the crew chose.
+     *
+     * The planner's last tiebreak is "roster order" (AGENTS.md → Decisions),
+     * and before this column that meant whatever order the rows happened to
+     * come back in — primary-key order, and the keys are client-generated
+     * UUIDs. So who started the race was effectively arbitrary. This makes the
+     * order a thing the crew owns.
+     *
+     * Null sorts last, so a driver added mid-weekend does not silently jump
+     * the queue.
+     */
+    sort_order: integer('sort_order'),
     notes: text('notes'),
     ...syncColumns,
   },
@@ -439,6 +452,42 @@ export const laps = pgTable(
       .on(t.session_id, t.source, t.external_id)
       .where(sql`${t.external_id} is not null`),
   ],
+)
+
+/**
+ * When a driver can be in the car, for one session — SPEC §5.1, #57.
+ *
+ * Per session rather than per driver, because availability is a fact about a
+ * weekend, not about a person: somebody who has to leave at one on Saturday is
+ * there all day on Sunday.
+ *
+ * `pinned_sequence` is the blunter instrument beside it. A window says "I have
+ * to leave by one"; a pin says "I am taking the start". Both are honoured and
+ * they can contradict each other, in which case the planner refuses rather than
+ * quietly picking one.
+ */
+export const driver_availability = pgTable(
+  'driver_availability',
+  {
+    id: uuid('id').primaryKey(),
+    team_id: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    session_id: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    driver_id: uuid('driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    /** Null means "from the green flag". */
+    available_from_at: timestamp('available_from_at', { withTimezone: true }),
+    /** Null means "to the chequered flag". */
+    available_until_at: timestamp('available_until_at', { withTimezone: true }),
+    /** 1-based stint number this driver must take, if any. */
+    pinned_sequence: integer('pinned_sequence'),
+    ...syncColumns,
+  },
+  (t) => [uniqueIndex('driver_availability_session_driver_uq').on(t.session_id, t.driver_id)],
 )
 
 // ---------------------------------------------------------------------------

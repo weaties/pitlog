@@ -6,12 +6,13 @@
  * Nothing on this screen awaits a network.
  */
 
+import { inRunningOrder, moveInOrder } from '@pitlog/domain'
 import type { SyncRow } from '@pitlog/sync'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../lib/api.js'
 import { useCurrentTeam } from '../lib/team.js'
-import { byText, useLocalTable, useRefreshLocal } from '../offline/useLocalTable.js'
+import { useLocalTable, useRefreshLocal } from '../offline/useLocalTable.js'
 import { useSync } from '../offline/useSync.js'
 import { deleteRow, newId, saveRow } from '../offline/write.js'
 import { Button, Card, Empty, Field, Input, Toggle } from '../ui/controls.js'
@@ -20,6 +21,8 @@ import { Shell } from '../ui/Shell.js'
 interface Driver {
   first_name: string
   last_name: string | null
+  /** The crew's running order; null until somebody places them. */
+  sort_order: number | null
   can_drive: boolean
   min_stint_seconds: number | null
   max_stint_seconds: number | null
@@ -40,7 +43,21 @@ export function TeamPage() {
   if (!teamId) return <Shell title="Team">You are not a member of any team yet.</Shell>
 
   const context = { teamId, userId }
-  const roster = byText(drivers.data ?? [], 'first_name')
+  // The same order the planner uses, from the same function — the screen and
+  // the plan disagreeing about who is first is exactly the bug #56 describes.
+  const roster = inRunningOrder(drivers.data ?? [])
+
+  const reorder = async (driverId: string, direction: 'up' | 'down') => {
+    // Every row is rewritten, not just the swapped pair: a half-applied
+    // reorder that survived a merge would leave two drivers claiming a slot.
+    const moved = moveInOrder(roster, driverId, direction)
+    for (const [index, driver] of moved.entries()) {
+      const before = roster.find((d) => d.id === driver.id)
+      if (before?.sort_order === index) continue
+      await saveRow('drivers', { ...driver, sort_order: index }, context)
+    }
+    refresh(['drivers'])
+  }
 
   const save = async (row: SyncRow<Driver>) => {
     await saveRow('drivers', row as never, context)
@@ -62,18 +79,22 @@ export function TeamPage() {
     >
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold text-pit-muted text-sm uppercase tracking-wide">
-          Roster ({roster.length})
+          Running order ({roster.length})
         </h2>
+        <p className="text-pit-muted text-sm">
+          The planner starts at the top and works down when drivers are level on seat time.
+        </p>
 
         {roster.length === 0 && <Empty>Nobody on the roster yet.</Empty>}
 
         <ul className="flex flex-col gap-2" data-testid="roster">
-          {roster.map((driver) => (
+          {roster.map((driver, index) => (
             <li key={driver.id}>
               <Card>
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-lg">
+                      <span className="text-pit-muted tabular-nums">{index + 1}.</span>{' '}
                       {driver.first_name} {driver.last_name ?? ''}
                     </p>
                     <p className="text-pit-muted text-sm">
@@ -83,12 +104,30 @@ export function TeamPage() {
                     </p>
                   </div>
                   {canWrite && (
-                    <Button
-                      onClick={() => setEditing(driver)}
-                      aria-label={`Edit ${driver.first_name}`}
-                    >
-                      Edit
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        aria-label={`Move ${driver.first_name} up`}
+                        data-testid={`up-${driver.id}`}
+                        disabled={index === 0}
+                        onClick={() => void reorder(driver.id, 'up')}
+                      >
+                        ↑
+                      </Button>
+                      <Button
+                        aria-label={`Move ${driver.first_name} down`}
+                        data-testid={`down-${driver.id}`}
+                        disabled={index === roster.length - 1}
+                        onClick={() => void reorder(driver.id, 'down')}
+                      >
+                        ↓
+                      </Button>
+                      <Button
+                        onClick={() => setEditing(driver)}
+                        aria-label={`Edit ${driver.first_name}`}
+                      >
+                        Edit
+                      </Button>
+                    </div>
                   )}
                 </div>
               </Card>

@@ -25,6 +25,7 @@ export const SYNC_TABLES = [
   'drivers',
   'stints',
   'fuel_fills',
+  'driver_availability',
   'consumable_sets',
   'consumable_events',
   'expenses',
@@ -121,6 +122,8 @@ export const SYNC_TABLE_SCHEMAS = {
     min_stint_seconds: optionalInt,
     max_stint_seconds: optionalInt,
     burn_rate_factor: optionalDecimal,
+    /** The crew's running order. Null sorts last — see the db schema. */
+    sort_order: optionalInt,
     notes: optionalText,
   }),
   stints: table({
@@ -144,6 +147,13 @@ export const SYNC_TABLE_SCHEMAS = {
     cost_cents: optionalInt,
     filled_to_full: z.boolean().default(true),
     notes: optionalText,
+  }),
+  driver_availability: table({
+    session_id: uuid,
+    driver_id: uuid,
+    available_from_at: optionalTimestamp,
+    available_until_at: optionalTimestamp,
+    pinned_sequence: optionalInt,
   }),
   consumable_sets: table({
     kind: z.enum(['tires', 'brake_pads', 'oil']),

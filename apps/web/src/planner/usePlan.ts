@@ -18,6 +18,7 @@ import type {
 import {
   estimateBurnRate,
   evaluatePitNow,
+  inRunningOrder,
   parseSeriesRules,
   replanFromNow,
   solveStintPlan,
@@ -78,6 +79,7 @@ interface SessionRow {
 interface DriverRow {
   first_name: string
   can_drive: boolean
+  sort_order: number | null
   min_stint_seconds: number | null
   max_stint_seconds: number | null
   burn_rate_factor: string | null
@@ -96,6 +98,14 @@ interface FillRow {
   filled_to_full: boolean
 }
 
+interface AvailabilityRow {
+  session_id: string
+  driver_id: string
+  available_from_at: string | null
+  available_until_at: string | null
+  pinned_sequence: number | null
+}
+
 export interface PlanView {
   ready: boolean
   /** Why a plan could not be attempted at all, in plain words. */
@@ -105,6 +115,8 @@ export interface PlanView {
   drivers: SyncRow<DriverRow>[]
   burnRate: BurnRateEstimate | null
   rules: SeriesRulesConfig | null
+  /** Windows in play, so the plan can say it was shaped by one. */
+  constrained: { driverId: string; untilSeconds: number | null; fromSeconds: number | null }[]
   result: StintPlanResult | null
   /** True when the plan was re-solved from now rather than from the grid. */
   live: boolean
@@ -124,11 +136,14 @@ export function usePlan(teamId: string | undefined): PlanView {
   const drivers = useLocalTable<DriverRow>('drivers')
   const stints = useLocalTable<StintRow>('stints')
   const fills = useLocalTable<FillRow>('fuel_fills')
+  const availability = useLocalTable<AvailabilityRow>('driver_availability')
   const rules = useRules(teamId)
 
   const event = (events.data ?? [])[0]
   const session = (sessions.data ?? []).find((s) => s.event_id === event?.id)
-  const roster = (drivers.data ?? []).filter((d) => d.can_drive)
+  // Ordered here, once. The solver's last tiebreak is roster order, and
+  // handing it IndexedDB key order would make it arbitrary — see #56.
+  const roster = inRunningOrder((drivers.data ?? []).filter((d) => d.can_drive))
 
   const driverName = (id: string | null) =>
     (drivers.data ?? []).find((d) => d.id === id)?.first_name ?? 'Unknown'
@@ -141,6 +156,7 @@ export function usePlan(teamId: string | undefined): PlanView {
     drivers: roster,
     burnRate: null,
     rules: null,
+    constrained: [],
     result: null,
     live: false,
     elapsedSeconds: 0,
@@ -186,13 +202,29 @@ export function usePlan(teamId: string | undefined): PlanView {
 
   const config = activeConfig(rules.data ?? [], event.series_id)
 
-  const plannerDrivers: PlannerDriver[] = roster.map((d) => ({
-    id: d.id,
-    canDrive: true,
-    minStintSeconds: d.min_stint_seconds,
-    maxStintSeconds: d.max_stint_seconds,
-    burnRateFactor: d.burn_rate_factor ? Number(d.burn_rate_factor) : 1,
-  }))
+  // Windows are stored as wall-clock instants and the solver works in offsets
+  // from the plan's zero, so they are converted once, here.
+  const windowFor = (driverId: string) =>
+    (availability.data ?? []).find((a) => a.session_id === session.id && a.driver_id === driverId)
+
+  const toOffset = (at: string | null | undefined): number | null => {
+    if (!at || !sessionStart) return null
+    return Math.round((new Date(at).getTime() - sessionStart.getTime()) / 1000)
+  }
+
+  const plannerDrivers: PlannerDriver[] = roster.map((d) => {
+    const window = windowFor(d.id)
+    return {
+      id: d.id,
+      canDrive: true,
+      minStintSeconds: d.min_stint_seconds,
+      maxStintSeconds: d.max_stint_seconds,
+      burnRateFactor: d.burn_rate_factor ? Number(d.burn_rate_factor) : 1,
+      availableFromSeconds: toOffset(window?.available_from_at),
+      availableUntilSeconds: toOffset(window?.available_until_at),
+      pinnedSequence: window?.pinned_sequence ?? null,
+    }
+  })
 
   const input = {
     raceSeconds: session.scheduled_duration_seconds,
@@ -239,6 +271,13 @@ export function usePlan(teamId: string | undefined): PlanView {
     drivers: roster,
     burnRate,
     rules: config,
+    constrained: plannerDrivers
+      .filter((d) => d.availableFromSeconds !== null || d.availableUntilSeconds !== null)
+      .map((d) => ({
+        driverId: d.id,
+        fromSeconds: d.availableFromSeconds ?? null,
+        untilSeconds: d.availableUntilSeconds ?? null,
+      })),
     result,
     live,
     elapsedSeconds,
