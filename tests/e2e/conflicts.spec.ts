@@ -86,11 +86,17 @@ test('a human can put the losing value back in one action', async ({ page }) => 
   await push(page, teamId, { id: rowId, gallons: 9.1, at: '2026-10-10T20:01:00.000Z', by: KIM })
   await push(page, teamId, { id: rowId, gallons: 3.3, at: '2026-10-10T20:05:00.000Z', by: SAM })
 
+  // Find *this* test's conflict rather than whichever is first on screen: the
+  // suite shares one database, so the list holds other tests' conflicts too.
+  const listed = await page.request.get(`${API}/api/teams/${teamId}/conflicts`)
+  const { conflicts } = (await listed.json()) as { conflicts: { id: string; row_id: string }[] }
+  const mine = conflicts.find((c) => c.row_id === rowId)
+  expect(mine).toBeDefined()
+
   await page.getByRole('link', { name: 'Log' }).click()
   await expect(page.getByTestId('conflicts')).toContainText('9.1')
 
-  const restore = page.getByTestId('conflicts').getByRole('button', { name: 'Put it back' }).first()
-  await restore.click()
+  await page.getByTestId(`restore-${mine?.id}`).click()
 
   // Restoring is an ordinary write: it queues and syncs like anything else.
   await page.getByTestId('sync-status').click()
