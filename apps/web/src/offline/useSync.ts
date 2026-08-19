@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncRunResult } from './client.js'
 import { syncOnce } from './client.js'
+import { useRefreshLocal } from './useLocalTable.js'
 
 /** Idle poll. Long enough not to burn a phone battery over a race weekend. */
 const IDLE_INTERVAL_MS = 30_000
@@ -16,6 +17,7 @@ const IDLE_INTERVAL_MS = 30_000
 export interface SyncState {
   queued: number
   online: boolean
+  /** Null until the first cycle finishes — "empty" and "not yet" differ. */
   lastRunAt: Date | null
   conflicts: SyncRunResult['conflicts']
   rejected: SyncRunResult['rejected']
@@ -36,6 +38,7 @@ export function useSync(teamId: string | undefined): SyncState & { syncNow: () =
   // it: two drains would push the same batch twice. Harmless, but it doubles
   // the traffic at exactly the moment there is least of it to spare.
   const running = useRef(false)
+  const refreshLocal = useRefreshLocal()
 
   const run = useCallback(async () => {
     if (!teamId || running.current) return
@@ -44,6 +47,12 @@ export function useSync(teamId: string | undefined): SyncState & { syncNow: () =
 
     try {
       const result = await syncOnce(teamId)
+
+      // A pull writes straight into IndexedDB, which no screen is watching.
+      // Without this the rows are on the device and invisible — the weekend
+      // downloads and the app still says there are no races.
+      if (result.pulled > 0) refreshLocal()
+
       setState({
         queued: result.queued,
         online: result.online,
@@ -59,7 +68,7 @@ export function useSync(teamId: string | undefined): SyncState & { syncNow: () =
     } finally {
       running.current = false
     }
-  }, [teamId])
+  }, [teamId, refreshLocal])
 
   useEffect(() => {
     if (!teamId) return

@@ -68,7 +68,9 @@ export function RacePage() {
         ) : null
       }
     >
-      {all.length === 0 && !editing && <Empty>No race weekends yet.</Empty>}
+      {all.length === 0 && !editing && (
+        <Empty>{sync.lastRunAt ? 'No race weekends yet.' : 'Fetching the weekend…'}</Empty>
+      )}
 
       <ul className="flex flex-col gap-3" data-testid="events">
         {all.map((event) => {
