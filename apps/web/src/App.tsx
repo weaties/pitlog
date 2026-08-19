@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ApiError, api } from './lib/api.js'
+import { LogPage } from './pages/Log.js'
 import { Login } from './pages/Login.js'
 import { RacePage } from './pages/Race.js'
 import { TeamPage } from './pages/Team.js'
@@ -40,6 +41,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/" element={<RacePage />} />
+        <Route path="/log" element={<LogPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
