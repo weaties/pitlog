@@ -75,7 +75,10 @@ export async function readTableWithDeleted<T = Record<string, unknown>>(
   return promisify<SyncRow<T>[]>(db.transaction(table, 'readonly').objectStore(table).getAll())
 }
 
-export async function writeRows(table: SyncTableName, rows: readonly SyncRow[]): Promise<void> {
+export async function writeRows<T>(
+  table: SyncTableName,
+  rows: readonly SyncRow<T>[],
+): Promise<void> {
   if (rows.length === 0) return
   const db = await openLocalDb()
   const tx = db.transaction(table, 'readwrite')

@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ApiError, api } from './lib/api.js'
-import { Dashboard } from './pages/Dashboard.js'
 import { Login } from './pages/Login.js'
+import { RacePage } from './pages/Race.js'
+import { TeamPage } from './pages/Team.js'
+import { TabBar } from './ui/Shell.js'
 
 interface Me {
   userId: string
@@ -24,11 +26,24 @@ export function App() {
 
   const signedIn = me.isSuccess
 
+  if (!signedIn) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    )
+  }
+
   return (
-    <Routes>
-      <Route path="/login" element={signedIn ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/" element={signedIn ? <Dashboard /> : <Navigate to="/login" replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<RacePage />} />
+        <Route path="/team" element={<TeamPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <TabBar />
+    </>
   )
 }
