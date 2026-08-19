@@ -7,17 +7,17 @@
  * background, via `useSync`.
  */
 
-import type { SyncRow, SyncTableName } from '@pitlog/sync'
+import type { PullableTableName, SyncRow } from '@pitlog/sync'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
 import { readTable, readTableWithDeleted } from './idb.js'
 
-export function localTableKey(table: SyncTableName, includeDeleted = false) {
+export function localTableKey(table: PullableTableName, includeDeleted = false) {
   return ['local', table, includeDeleted] as const
 }
 
 export function useLocalTable<T = Record<string, unknown>>(
-  table: SyncTableName,
+  table: PullableTableName,
   options: { includeDeleted?: boolean } = {},
 ) {
   const includeDeleted = options.includeDeleted ?? false
@@ -37,7 +37,7 @@ export function useLocalTable<T = Record<string, unknown>>(
 export function useRefreshLocal() {
   const client = useQueryClient()
   return useCallback(
-    (tables?: readonly SyncTableName[]) => {
+    (tables?: readonly PullableTableName[]) => {
       if (!tables) {
         void client.invalidateQueries({ queryKey: ['local'] })
         return

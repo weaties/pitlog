@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ApiError, api } from './lib/api.js'
+import { KitPage } from './pages/Kit.js'
 import { LogPage } from './pages/Log.js'
 import { Login } from './pages/Login.js'
 import { MoneyPage } from './pages/Money.js'
@@ -50,6 +51,7 @@ export function App() {
         <Route path="/log" element={<LogPage />} />
         <Route path="/plan" element={<PlanPage />} />
         <Route path="/money" element={<MoneyPage />} />
+        <Route path="/kit" element={<KitPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

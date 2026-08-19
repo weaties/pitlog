@@ -1,4 +1,5 @@
 export * from './burn-rate.js'
+export * from './consumables.js'
 export * from './driver-burn-rate.js'
 export * from './expenses.js'
 export * from './fixtures/eight-hour-race.js'

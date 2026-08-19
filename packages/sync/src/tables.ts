@@ -35,6 +35,26 @@ export const SYNC_TABLES = [
 
 export type SyncTableName = (typeof SYNC_TABLES)[number]
 
+/**
+ * Tables the client may **read** but never write.
+ *
+ * `laps` are ingested from a timing provider by the server (SPEC §5.4), so a
+ * phone has no business pushing them — but it very much needs to read them:
+ * laps on a tyre set are derived from this table, never hand-counted.
+ *
+ * `media_assets` and `telemetry_files` are deliberately absent. They are M2,
+ * and pulling manifests nobody reads onto every phone would cost bandwidth at
+ * exactly the place there is none.
+ */
+export const PULL_ONLY_TABLES = ['laps'] as const
+
+export type PullOnlyTableName = (typeof PULL_ONLY_TABLES)[number]
+
+/** Everything the client keeps a local copy of. */
+export const PULLABLE_TABLES = [...SYNC_TABLES, ...PULL_ONLY_TABLES] as const
+
+export type PullableTableName = SyncTableName | PullOnlyTableName
+
 export function isSyncTable(value: unknown): value is SyncTableName {
   return typeof value === 'string' && (SYNC_TABLES as readonly string[]).includes(value)
 }

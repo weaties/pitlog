@@ -1,5 +1,5 @@
 import * as schema from '@pitlog/db/schema'
-import { SYNC_TABLES } from '@pitlog/sync'
+import { PULL_ONLY_TABLES, PULLABLE_TABLES, SYNC_TABLES } from '@pitlog/sync'
 import { getTableName, is } from 'drizzle-orm'
 import { PgTable } from 'drizzle-orm/pg-core'
 import { describe, expect, it } from 'vitest'
@@ -47,6 +47,19 @@ describe('the sync allowlist and the schema cannot drift apart', () => {
 
   it('exposes the same table set from the store as from the protocol', () => {
     expect([...SYNC_TABLE_NAMES].sort()).toEqual([...SYNC_TABLES].sort())
+  })
+
+  it('keeps the pull-only tables out of the writable allowlist', () => {
+    // `laps` are ingested from a timing provider by the server, so the client
+    // reads them and can never push them.
+    for (const name of PULL_ONLY_TABLES) {
+      expect(SYNC_TABLES).not.toContain(name)
+      expect(SERVER_WRITTEN_ONLY).toContain(name)
+    }
+  })
+
+  it('pulls exactly the writable tables plus the read-only ones', () => {
+    expect([...PULLABLE_TABLES].sort()).toEqual([...SYNC_TABLES, ...PULL_ONLY_TABLES].sort())
   })
 
   it('only lets the client write tables that are team-scoped', () => {

@@ -38,6 +38,7 @@ const TABS = [
   { to: '/', label: 'Race' },
   { to: '/log', label: 'Log' },
   { to: '/plan', label: 'Plan' },
+  { to: '/kit', label: 'Kit' },
   { to: '/money', label: 'Money' },
   { to: '/team', label: 'Team' },
 ]
