@@ -1,0 +1,44 @@
+# ChampCar Endurance Series — series rule config
+#
+# !!! UNVERIFIED !!!
+# SPEC §3 lists "per-series rule details to encode" as an OPEN ITEM owned by Dan.
+# Every number below is a structurally-valid PLACEHOLDER, not a real rule. They
+# exist so the schema, the migrations, and the planner's input plumbing can be
+# built and tested before the rulebooks are read. Do NOT plan a real race from
+# this file, and do NOT "improve" these numbers by guessing.
+#
+# To verify: read the current ChampCar Endurance Series rulebook, replace the values, add the
+# citation under `verification.source`, list the checked paths in
+# `verified_fields`, move `status` to PARTIAL/VERIFIED, and bump
+# `config_version`. See .claude/skills/series-rules/SKILL.md.
+
+schema_version: 1
+series_key: champcar
+display_name: ChampCar Endurance Series
+config_version: 1
+
+verification:
+  status: UNVERIFIED
+  source: null
+  checked_at: null
+  verified_fields: []
+
+pit:
+  min_stop_seconds: 300              # PLACEHOLDER
+  engine_off_for_fueling: true       # PLACEHOLDER
+  driver_in_car_during_fueling: false # PLACEHOLDER
+  driver_change_during_fueling: false # PLACEHOLDER
+  max_crew_over_wall: null           # unknown
+
+fueling:
+  max_fuel_capacity_gallons: null    # unknown
+  refuel_allowed_under_yellow: true  # PLACEHOLDER
+  fuel_can_only: true                # PLACEHOLDER
+  max_can_size_gallons: null         # unknown
+
+driver:
+  min_stint_seconds: 1800            # PLACEHOLDER (30 min)
+  max_stint_seconds: 7200            # PLACEHOLDER (2 h)
+  max_consecutive_stint_seconds: 7200 # PLACEHOLDER (2 h)
+  min_drivers_per_event: 2           # PLACEHOLDER
+  max_share_of_race: 0.6             # PLACEHOLDER

@@ -73,9 +73,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # No --with-deps: it shells out to apt-get, which stalls on the runner's
+        # mirrorlist often enough to wedge the job, and the ubuntu-latest image
+        # already ships the libraries headless chromium needs. If one ever goes
+        # missing, the Playwright step below names it directly.
+        # --only-shell: the suite runs headless chromium only.
+        timeout-minutes: 5
+        run: npx playwright install --only-shell chromium
+      - name: Migrate + seed
+        run: npm run db:migrate && npm run db:seed
       - name: Playwright
+        timeout-minutes: 10
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
